@@ -59,7 +59,7 @@ setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
 # setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
 
-FOR <- readr::read_csv("FOR.csv", col_types = cols(.default = col_character()))
+FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
 NightM <- read_excel("motionloggerdata.xlsx")
 
@@ -176,7 +176,13 @@ nonlinear <- gamm(
   method = "REML"
 )
 
+linear <- lmer(SleepDurationInSpt ~ fhr*age + sex + weekend + (1|fid/subject_id), data= merged)
+summary(linear)
+r2 <- MuMIn::r.squaredGLMM(linear)
+r2
 
+summary(nonlinear$gam)
+summary(nonlinear$lme)
 ```
 
 ##Visualization
@@ -213,7 +219,7 @@ pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(sub
 
 newdat$fit <- pred$fit
 newdat$se <- pred$se.fit
-z <- qnorm(0.99165)  # 1.96
+z <- qnorm(0.975)  # 1.96
 newdat <- newdat %>%
   mutate(
     lower = fit - z * se,
@@ -270,13 +276,16 @@ TSToutput <- ggplot() +
        color = "Group",
        fill = "Group") +
   theme_minimal()
-
+TSToutput
 ggsave(
-  "SleepTrajectories99CI.png",
-  plot = last_plot(),
+  "SleepTrajectories99CI2.png",
+  plot = TSToutput,
   width = 6.9, height = 4.6, units = "in", dpi = 300,
   bg = "white"
 )
+
+
+
 
 ```
 

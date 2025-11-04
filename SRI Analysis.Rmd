@@ -341,13 +341,34 @@ SRIoutput <- ggplot() +
     y = "Sleep Regularity"
   ) +
   theme_minimal()
-
+SRIoutput
 
 ggsave(
-  "SRI_SleepTrajectorieshiconfidence.png",
-  plot = last_plot(),
+  "SRI_SleepTrajectorieshiconfidence2.png",
+  plot = SRIoutput,
   width = 6.9, height = 4.6, units = "in", dpi = 300,
   bg = "white"
 )
 
+
+diff <- difference_smooths(
+  nonlinear, smooth = "s(age)",                          # base label of the smooth
+  n = 200, unconditional = TRUE,
+  interval = "simultaneous", level = 0.983,        # or 0.9833 if you insist on Bonferroni across 3 outcomes
+  comp = list(fhr = c("FHR", "Control"))
+)
+draw(diff)
+
+ggplot(diff, aes(x = age, y = .diff)) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
+              fill = "grey70", alpha = 0.4) +
+  geom_line(color = "#FF6666", linewidth = 1.3) +
+  geom_rug(data = diff, aes(x = age), sides = "b", alpha = 0.2) +
+  labs(
+    title = "Difference in Sleep Duration (FHR − Control)",
+    x = "Age (years)",
+    y = "Difference in predicted sleep duration (hours)"
+  ) +
+  theme_minimal(base_size = 13)
 ```
