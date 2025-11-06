@@ -242,7 +242,7 @@ table(merged$group)
 #Main Analysis
 ##SRI
 ```{r}
-
+merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
 
 nonlinear <- gamm(
   SRI2_scaled ~ fhr + sex + weekend +
@@ -252,7 +252,21 @@ nonlinear <- gamm(
   method = "REML"
 )
 
-summary(nonlinear$gam)
+nonlinear_order <- gamm(
+  SRI2_scaled ~ fhr2 + sex + weekend + s(age, k = 5) +
+    s(age, by = fhr2, k = 5),        # additional smooth for FHR
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+summary(nonlinear_order$gam)
+
+##Below p value is from the summary, there is likely a way to automate finding it but I dont care
+p <- signif(9.44e-05 * 3, 3)
+p <- format(p, scientific = FALSE)
+p <- ifelse(p < 0.001, "<0.001", format(signif(p, 3), scientific = FALSE))
+p
 ```
 
 ##Visualization
@@ -343,32 +357,80 @@ SRIoutput <- ggplot() +
   theme_minimal()
 SRIoutput
 
+diff <- difference_smooths(
+  nonlinear, smooth = "s(age)",                          # base label of the smooth
+  n = 2000, unconditional = TRUE,
+  interval = "simultaneous", level = 0.983,        # or 0.9833 if you insist on Bonferroni across 3 outcomes
+  comp = list(fhr = c("FHR", "Control"))
+)
+
+SRIdiff <- ggplot(diff, aes(x = age, y = .diff)) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
+              fill = "#B380B3", alpha = 0.4) +
+  geom_line(color = "#B380B3", linewidth = 1.3) +
+  ggtitle("Difference in Sleep Regularity (FHR - Control)") +
+  xlab("Age") +
+  ylab("Difference in Predicted Sleep Regularity") +
+  theme_minimal() +
+  annotate(
+    "text",
+    x = min(diff$age, na.rm = TRUE),
+    y = min(diff$.lower_ci, na.rm = TRUE),
+    label = as.character(
+      as.expression(
+        bquote(bold(italic("p"))[Bonf.] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
+      )
+    ),
+    parse = TRUE,
+    hjust = 0, vjust = -1, size = 4.2
+  )
+SRIdiff
+
+SRIoutput <- SRIoutput +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+SRIdiff <- SRIdiff +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+
+library(patchwork)
+SRIcombo <- SRIoutput + SRIdiff +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    title = "Sleep Regularity Trajectories and Group Differences",
+    theme = theme(
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      plot.margin = margin(15, 15, 15, 15)
+    )
+  )
+
+SRIcombo
+
+
+
 ggsave(
   "SRI_SleepTrajectorieshiconfidence2.png",
   plot = SRIoutput,
   width = 6.9, height = 4.6, units = "in", dpi = 300,
   bg = "white"
 )
-
-
-diff <- difference_smooths(
-  nonlinear, smooth = "s(age)",                          # base label of the smooth
-  n = 200, unconditional = TRUE,
-  interval = "simultaneous", level = 0.983,        # or 0.9833 if you insist on Bonferroni across 3 outcomes
-  comp = list(fhr = c("FHR", "Control"))
+ggsave(
+  "SRI_SleepTrajectorieshiconfidence2.png",
+  plot = SRIoutput,
+  width = 6.9, height = 4.6, units = "in", dpi = 300,
+  bg = "white"
 )
-draw(diff)
-
-ggplot(diff, aes(x = age, y = .diff)) +
-  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
-  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
-              fill = "grey70", alpha = 0.4) +
-  geom_line(color = "#FF6666", linewidth = 1.3) +
-  geom_rug(data = diff, aes(x = age), sides = "b", alpha = 0.2) +
-  labs(
-    title = "Difference in Sleep Duration (FHR − Control)",
-    x = "Age (years)",
-    y = "Difference in predicted sleep duration (hours)"
-  ) +
-  theme_minimal(base_size = 13)
+ggsave(
+  "SRI_Patchwork.png",
+  plot = SRIcombo,
+  width = 8.5, height = 6.5, units = "in", dpi = 600,
+  bg = "white"
+)
 ```
