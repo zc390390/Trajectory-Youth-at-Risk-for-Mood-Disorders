@@ -169,6 +169,7 @@ merged %>%
     y = "Number of Assessments"
   ) +
   theme_minimal()
+
 ```
 
 #Non Participators 
@@ -184,6 +185,18 @@ unmerged <- unmerged %>%
   ungroup()
 
 table(unmerged$assessment_date)
+
+
+
+
+unmerged <- unmerged %>%
+  mutate(fhr = ifelse(group %in% c(1, 2, 3), 1, 0))
+unmerged$sex <- factor(unmerged$sex,
+                       levels = c(0, 1),
+                       labels = c("Male", "Female"))
+unmerged <- unmerged %>%
+  filter(group != 3)
+table(unmerged$group)
 
 ##YEAR
 cutoff <- as.Date("2021-07-01")
@@ -207,11 +220,43 @@ cat("Filtered out", n_before - n_after, "rows (Age")
 
 ##CONSENT
 n_before <- nrow(unmerged)
+table(unmerged$oconsint, useNA = "always")
 unmerged <- unmerged %>%
   filter(oconsint == 2)
 n_after <- nrow(unmerged)
 cat("Filtered out", n_before - n_after, "rows (Age")
 
+class(merged$age)
+
+
+unique(merged$subject_id)
+unique(unmerged$subject_id)
+
+#Age
+t.test(merged$age, unmerged$age)
+
+#Fhr
+chisq.test(table(merged$fhr, unmerged$fhr))
+merged$participation <- "Participated"
+unmerged$participation <- "Did_Not_Participate"
+combined <- bind_rows(
+  merged %>% select(fhr, participation),
+  unmerged %>% select(fhr, participation)
+)
+combined$fhr <- factor(combined$fhr, levels = c(0, 1), labels = c("Control", "FHR"))
+table(combined$participation, combined$fhr)
+chisq.test(table(combined$participation, combined$fhr))
+
+#Sex
+merged$participation <- "Participated"
+unmerged$participation <- "Did_Not_Participate"
+combined <- bind_rows(
+  merged %>% select(sex, participation),
+  unmerged %>% select(sex, participation)
+)
+combined$fhr <- factor(combined$sex, levels = c(0, 1), labels = c("Male", "Female"))
+table(combined$participation, combined$sex)
+chisq.test(table(combined$participation, combined$sex))
 
 ```
 
@@ -235,8 +280,7 @@ merged$sex <- factor(merged$sex,
 merged <- merged %>%
   mutate(
     mdd = factor(ifelse(group == "MDD Risk", 1, 0), levels = c(0, 1)),
-    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1)),
-    psy = factor(ifelse(group == "Psy Risk", 1, 0), levels = c(0, 1))
+    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1))
   )
 
 table(merged$race)
@@ -249,6 +293,10 @@ merged$race <- factor(merged$race,
                       labels = c("White", "Black", "Asian", "First Nation", "Other"))
 
 table(merged$group, merged$race, useNA = "always")
+
+
+merged <- merged %>% filter(age >= 8)
+merged <- merged %>% filter(group != 'Psy Risk')
 
 ```
 
@@ -315,8 +363,13 @@ demo_groups <- merged_subj %>%
   ) %>%
   rename(group_label = group)
 
+
 # Step 3: Combine
 demo_all <- bind_rows(demo_fhr, demo_groups)
+
+demo_all <- demo_all %>% 
+  filter(group_label != "At-Risk Overall")
+
 
 # Step 4: Combine mean ± SD with paste
 demo_all <- demo_all %>%
@@ -359,7 +412,56 @@ ft <- set_header_labels(ft, Variable = "") |>
 
 ft
 # Export
+setwd("outputs")
 save_as_docx(ft, path = "Table1_Demographics_APA.docx")
+
+merged_subj <- merged_subj %>%
+  filter(group != "Psy Risk") %>%      # remove rows
+  mutate(group = droplevels(group))    # drop the factor level
+
+
+tbl_sex <- table(merged_subj$group, merged_subj$sex)
+tbl_sex
+
+chisq_sex <- chisq.test(tbl_sex)
+chisq_sex
+
+tbl_race <- table(merged_subj$group, merged_subj$race)
+tbl_race
+
+chisq_race <- chisq.test(tbl_race)
+chisq_race
+
+
+
+merged_subj$White        <- merged_subj$race == "White"
+merged_subj$Black        <- merged_subj$race == "Black"
+merged_subj$Asian        <- merged_subj$race == "Asian"
+merged_subj$FirstNation  <- merged_subj$race == "First Nation"
+merged_subj$Other        <- merged_subj$race == "Other"
+
+
+chisq_white <- chisq.test(table(merged_subj$group, merged_subj$White))
+chisq_white
+
+
+chisq_black <- chisq.test(table(merged_subj$group, merged_subj$Black))
+chisq_black
+
+
+chisq_asian <- chisq.test(table(merged_subj$group, merged_subj$Asian))
+chisq_asian
+
+
+chisq_fn <- chisq.test(table(merged_subj$group, merged_subj$FirstNation))
+chisq_fn
+
+
+chisq_other <- chisq.test(table(merged_subj$group, merged_subj$Other))
+chisq_other
+
+anova_age <- aov(age ~ group, data = merged_subj)
+summary(anova_age)
 
 ```
 

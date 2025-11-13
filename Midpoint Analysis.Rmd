@@ -127,6 +127,8 @@ merged <- rbindlist(list(merged1, merged2), fill = TRUE)
 #Setup
 merged$sleeponset <- as.numeric(merged$sleeponset)
 merged$wakeup <- as.numeric(merged$wakeup)
+
+merged$midpoint <- merged$sleeponset + ((merged$wakeup - merged$sleeponset)/2)
 ```
 
 
@@ -162,14 +164,13 @@ merged$fid <- factor(merged$fid)
 
 
 #Remove Psy Risk and Those without gruop
-merged <- merged %>% filter(age >= 8 & age <= 22)
-#merged <- merged %>% filter(group != 'Psy Risk')
+merged <- merged %>% filter(age >= 8)
+merged <- merged %>% filter(group != 'Psy Risk')
 
 merged <- merged %>%
   mutate(
     mdd = factor(ifelse(group == "MDD Risk", 1, 0), levels = c(0, 1)),
-    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1)),
-    psy = factor(ifelse(group == "Psy Risk", 1, 0), levels = c(0, 1))
+    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1))
   )
 
 table(merged$group)
@@ -178,38 +179,31 @@ table(merged$group)
 #Main Analysis
 ##Timing
 ```{r}
-linear1 <- lmer(sleeponset ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
-summary(linear1)
+ggplot
 
-p <- (0.0105*4)
+linear <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
+summary(linear)
+
+
+
+p <- (0.0105*3)
 print(p)
-confint(linear1, method = "profile")
+confint(linear, method = "profile")
 
 
-linear1_exploration <- lmer(sleeponset ~ mdd*age + bd*age + psy*age + sex + weekend + (1|fid/subject_id), data = merged)
-summary(linear1_exploration)
-p_mdd <- (0.00102*4)
-p_bd <- (0.5*4)
-p_psy <- (0.9*4)
-print(paste0("MDD P = ", p_mdd, "  BD P = ", p_bd, "  PSY P =", p_psy))
-confint(linear1_exploration, method = "profile")
-
-linear2 <- lmer(wakeup ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
-summary(linear2)
-confint(linear2, method = "profile")
-p <- 'nonsig'
-
-linear2_exploration <- lmer(wakeup ~ mdd*age + bd*age + psy*age + sex + weekend + (1|fid/subject_id), data = merged)
-summary(linear2_exploration)
-p <- 'nonsig for all'
-
+linear_exploration <- lmer(midpoint ~ mdd*age + bd*age + sex + weekend + (1|fid/subject_id), data = merged)
+summary(linear_exploration)
+p_mdd <- (4.5e-15*3)
+p_bd <- (0.000573*3)
+print(paste0("MDD P = ", p_mdd, "  BD P = ", p_bd))
+confint(linear_exploration, method = "profile")
 ```
 
 ###Table output
 ####Onset
 ```{r}
-mod1 <- broom.mixed::tidy(linear1, effects = "fixed", conf.int = TRUE)
-mod2 <- broom.mixed::tidy(linear1_exploration, effects = "fixed", conf.int = TRUE)
+mod1 <- broom.mixed::tidy(linear, effects = "fixed", conf.int = TRUE)
+mod2 <- broom.mixed::tidy(linear_exploration, effects = "fixed", conf.int = TRUE)
 
 format_model <- function(model_df) {
   model_df %>%
@@ -225,8 +219,7 @@ format_model <- function(model_df) {
         "bd1"  = "BD Risk",
         "psy1" = "Psy Risk",
         "mdd1:age" = "MDD × Age",
-        "age:bd1"  = "BD × Age",
-        "age:psy1" = "Psy × Age"
+        "age:bd1"  = "BD × Age"
       ),
       `b (SE)` = sprintf("%.2f (%.2f)", estimate, std.error),
       `95% CI` = sprintf("[%.2f, %.2f]", conf.low, conf.high),
@@ -274,79 +267,11 @@ ft <- add_header_row(
 
 ft
 
-save_as_docx(ft, path = "Onset_APA_Table.docx")
+setwd("outputs")
+save_as_docx(ft, path = "Midpoint_APA_Table.docx")
 ```
 
-####Wakeup
-```{r}
-mod1 <- broom.mixed::tidy(linear2, effects = "fixed", conf.int = TRUE)
-mod2 <- broom.mixed::tidy(linear2_exploration, effects = "fixed", conf.int = TRUE)
 
-format_model <- function(model_df) {
-  model_df %>%
-    mutate(
-      term = recode(term,
-        "(Intercept)" = "Intercept",
-        "fhrFHR" = "FHR (Group)",
-        "age" = "Age",
-        "sexFemale" = "Sex (Female)",
-        "weekendWeekend" = "Weekend",
-        "fhrFHR:age" = "FHR × Age",
-        "mdd1" = "MDD Risk",
-        "bd1"  = "BD Risk",
-        "psy1" = "Psy Risk",
-        "mdd1:age" = "MDD × Age",
-        "age:bd1"  = "BD × Age",
-        "age:psy1" = "Psy × Age"
-      ),
-      `b (SE)` = sprintf("%.2f (%.2f)", estimate, std.error),
-      `95% CI` = sprintf("[%.2f, %.2f]", conf.low, conf.high),
-      p = ifelse(p.value < 0.001, "<.001", sprintf("%.3f", p.value))
-    ) %>%
-    select(term, `b (SE)`, `95% CI`, p)
-}
-
-m1_table <- format_model(mod1)
-m2_table <- format_model(mod2)
-
-apa_table <- full_join(m1_table, m2_table, by = "term", suffix = c("_Model1", "_Model2")) %>%
-  arrange(match(term,
-    c("Intercept", "FHR (Group)", "MDD Risk", "BD Risk", "Psy Risk",
-      "Age", "Sex (Female)", "Weekend",
-      "FHR × Age", "MDD × Age", "BD × Age", "Psy × Age")
-  )) %>%
-  mutate(across(everything(), ~replace_na(., "")))
-
-# Build flextable --------------------------------------------------------
-ft <- flextable(apa_table)
-
-ft <- set_header_labels(
-  ft,
-  term = "Predictor",
-  `b (SE)_Model1` = "b (SE)",
-  `95% CI_Model1` = "95% CI",
-  p_Model1 = "p",
-  `b (SE)_Model2` = "b (SE)",
-  `95% CI_Model2` = "95% CI",
-  p_Model2 = "p"
-) |>
-  theme_booktabs() |>
-  autofit() |>
-  align(align = "center", part = "all") |>
-  bold(part = "header") |>
-  fontsize(size = 11, part = "all")
-
-# 🔹 Add the grouped model header row
-ft <- add_header_row(
-  ft,
-  values = c("", "Model 1", "Model 2"),
-  colwidths = c(1, 3, 3)   # 1 for Predictor, then 3 for each model
-)
-
-ft
-
-save_as_docx(ft, path = "Wakeup_APA_Table.docx")
-```
 ###Visualize Linear
 ####Onset
 ```{r}
@@ -364,12 +289,12 @@ newdat <- expand.grid(
 newdat$fid        <- factor(levels(merged$fid)[1], levels = levels(merged$fid))
 newdat$subject_id <- factor(levels(merged$subject_id)[1], levels = levels(merged$subject_id))
 
-newdat$fit <- predict(linear1, newdata = newdat, re.form = NA, allow.new.levels = TRUE)
+newdat$fit <- predict(linear, newdata = newdat, re.form = NA, allow.new.levels = TRUE)
 
 sum <- merged %>%
   group_by(filename) %>%
     summarise(
-      ONSETm = mean(sleeponset, na.rm = TRUE),
+      MIDm = mean(midpoint, na.rm = TRUE),
       age = mean(age, na.rm = TRUE),
       fhr = first(fhr)
     )
@@ -380,7 +305,7 @@ yep <- ggplot(newdat, aes(x = age, y = fit, color = fhr, fill = fhr)) +
   # raw data points for reference (optional)
   geom_point(
     data = sum,
-    aes(x = age, y = ONSETm, color = fhr),
+    aes(x = age, y = MIDm, color = fhr),
     alpha = 0.15,
     size = 1.2,
     inherit.aes = FALSE
@@ -394,10 +319,10 @@ yep <- ggplot(newdat, aes(x = age, y = fit, color = fhr, fill = fhr)) +
   ) + 
   # 🔹 Custom y-axis from 18 (6 PM) to 30 (6 AM next day)
   scale_y_continuous(
-    limits = c(18, 30),
-    breaks = seq(18, 30, by = 2),
-    labels = c("6:00 PM", "8:00 PM", "10:00 PM",
-               "12:00 AM", "2:00 AM", "4:00 AM", "6:00 AM")
+    limits = c(24, 32),
+    breaks = seq(24, 32, by = 2),
+    labels = c("12:00 PM", "2:00 AM",
+               "4:00 AM", "6:00 AM", "8:00 AM")
   ) +
   scale_x_continuous(limits = c(8,22),
                       breaks = seq(8,22, by = 4)) + 
@@ -429,9 +354,6 @@ newdat <- bind_rows(
               sex = "Male", weekend = "Weekday"),
   # BD risk
   expand.grid(age = age_seq, mdd = 0, bd = 1, psy = 0,
-              sex = "Male", weekend = "Weekday"),
-  # Psy risk
-  expand.grid(age = age_seq, mdd = 0, bd = 0, psy = 1,
               sex = "Male", weekend = "Weekday")
 )
 
@@ -440,7 +362,6 @@ newdat <- newdat %>%
   mutate(
     mdd      = factor(mdd, levels = levels(merged$mdd)),
     bd       = factor(bd,  levels = levels(merged$bd)),
-    psy      = factor(psy, levels = levels(merged$psy)),
     sex      = factor(sex, levels = levels(merged$sex)),
     weekend  = factor(weekend, levels = levels(merged$weekend)),
     fid        = factor(levels(merged$fid)[1], levels = levels(merged$fid)),
@@ -454,22 +375,21 @@ newdat <- newdat %>%
     group = case_when(
       mdd == 1 ~ "MDD Risk",
       bd  == 1 ~ "BD Risk",
-      psy == 1 ~ "Psy Risk",
       TRUE     ~ "Control"
     ),
-    group = factor(group, levels = c("Control", "MDD Risk", "BD Risk", "Psy Risk")),
+    group = factor(group, levels = c("Control", "MDD Risk", "BD Risk")),
     fid = factor(levels(merged$fid)[1], levels = levels(merged$fid)),
     subject_id = factor(levels(merged$subject_id)[1], levels = levels(merged$subject_id))
   )
 
-newdat$fit <- predict(linear1_exploration, newdata = newdat, re.form = NA, allow.new.levels = TRUE)
+newdat$fit <- predict(linear_exploration, newdata = newdat, re.form = NA, allow.new.levels = TRUE)
 
 library(ggplot2)
 
 sum <- merged %>%
   group_by(filename) %>%
     summarise(
-      ONSETm = mean(sleeponset, na.rm = TRUE),
+      MIDm = mean(midpoint, na.rm = TRUE),
       age = mean(age, na.rm = TRUE),
       group = first(group)
     )
@@ -484,16 +404,16 @@ yep2 <- ggplot(newdat, aes(x = age, y = fit, color = group)) +
   ) +
   geom_point(
     data = sum,
-    aes(x = age, y = ONSETm, color = group),
+    aes(x = age, y = MIDm, color = group),
     alpha = 0.15,
     size = 1.2,
     inherit.aes = FALSE
   ) +
   scale_y_continuous(
-    limits = c(18, 30),
-    breaks = seq(18, 30, by = 2),
-    labels = c("6:00 PM", "8:00 PM", "10:00 PM",
-               "12:00 AM", "2:00 AM", "4:00 AM", "6:00 AM")
+    limits = c(24, 32),
+    breaks = seq(24, 32, by = 2),
+    labels = c("12:00 PM", "2:00 AM",
+               "4:00 AM", "6:00 AM", "8:00 AM")
   ) +
   scale_x_continuous(
     limits = c(8, 22),
@@ -502,8 +422,7 @@ yep2 <- ggplot(newdat, aes(x = age, y = fit, color = group)) +
   scale_color_manual(
     values = c("Control" = "skyblue",
                "MDD Risk" = "#E69F00",
-               "BD Risk"  = "#D55E00",
-               "Psy Risk" = "#009E73")
+               "BD Risk"  = "#D55E00")
   ) +
   theme_minimal(base_size = 16) +
   theme(
@@ -518,7 +437,7 @@ yep2 <- ggplot(newdat, aes(x = age, y = fit, color = group)) +
     plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
     panel.grid.minor = element_blank()
   ) +
-  guides(color = guide_legend(nrow = 2, byrow = TRUE))
+  guides(color = guide_legend(nrow = 1, byrow = TRUE))
 
 yep2
 
@@ -527,414 +446,51 @@ library(patchwork)
 MIDcombo <- yep + yep2 +
   plot_layout(ncol = 2, widths = c(1, 1)) +
   plot_annotation(
-    title = "Predicted Sleep Onset & Observed Mean Sleep Onset",
+    title = "Predicted Sleep Midpoint & Observed Mean Sleep Midpoint",
     theme = theme(
       plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
       plot.margin = margin(15, 15, 15, 15)
     )
   )
 MIDcombo
+
+setwd("outputs")
 ggsave(
-  "Onset_Patchwork.png",
+  "Midpoint_Patchwork.png",
   plot = MIDcombo,
   width = 8.5, height = 6.5, units = "in", dpi = 600,
   bg = "white"
 )
 ```
 
-####Wakeup
 ```{r}
-age_seq <- seq(min(merged$age, na.rm = TRUE),
-               max(merged$age, na.rm = TRUE),
-               length.out = 100)
 
-newdat <- expand.grid(
-  age = age_seq,
-  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold constant
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend)) # hold constant
-)
-
-newdat$fid        <- factor(levels(merged$fid)[1], levels = levels(merged$fid))
-newdat$subject_id <- factor(levels(merged$subject_id)[1], levels = levels(merged$subject_id))
-
-newdat$fit <- predict(linear2, newdata = newdat, re.form = NA, allow.new.levels = TRUE)
-
-sumdat <- merged %>%
-  group_by(filename) %>%
-    summarise(
-      WAKEUPm = mean(wakeup, na.rm = TRUE),
-      age = mean(age, na.rm = TRUE),
-      fhr = first(fhr)
-    )
-
-yep <- ggplot(newdat, aes(x = age, y = fit, color = fhr, fill = fhr)) +
-  # predicted line
-  geom_line(linewidth = 1.2) +
-  # raw data points for reference (optional)
-  geom_point(
-    data = sumdat,
-    aes(x = age, y = WAKEUPm, color = fhr),
-    alpha = 0.15,
-    size = 1.2,
-    inherit.aes = FALSE
-  ) +
+ggplot(sum, aes(x = age, y = MIDm)) +
+  geom_point(alpha = 0.25, size = 1.3) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 5),
+              se = TRUE, linewidth = 1.2) +
   labs(
+    title = "Relationship Between Age and Sleep Midpoint",
     x = "Age (years)",
-    y = "Sleep Wakeup (Time)",
-    color = "Group",
-    fill  = "Group",
-    title = "Model 1"
+    y = "Sleep Midpoint (minutes)"
   ) +
-  scale_y_continuous(
-    limits = c(24, 36),
-    breaks = seq(24,36, by = 2),
-    labels = c("12:00 AM", "2:00 AM", "4:00 AM",
-               "6:00 AM", "8:00 AM", "10:00 AM", "12:00 PM")) +
-  scale_x_continuous(
-    limits = c(8, 22),
-    breaks = seq(8, 22, by = 4)
-  ) + 
-  scale_color_manual(values = c("Control" = "skyblue", "FHR" = "darkorange")) +
-  scale_fill_manual(values = c("Control" = "skyblue", "FHR" = "darkorange")) +
-  theme_minimal(base_size = 16) +
-  theme(
-    legend.position = "top",     # 🔹 move to right side
-    legend.title = element_blank(),     # 🔹 also ensures it's blank
-    legend.text  = element_text(size = 10),  # smaller labels
-    legend.key.size = unit(0.6, "lines"),    # smaller color keys
-    panel.grid.minor = element_blank(),
-    plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
-  )
+  theme_minimal(base_size = 16)
 
-yep
-##Subanalysis
-age_seq <- seq(min(merged$age, na.rm = TRUE),
-               max(merged$age, na.rm = TRUE),
-               length.out = 100)
-
-# Create valid group combinations
-newdat <- bind_rows(
-  # Control
-  expand.grid(age = age_seq, mdd = 0, bd = 0, psy = 0,
-              sex = "Male", weekend = "Weekday"),
-  # MDD risk
-  expand.grid(age = age_seq, mdd = 1, bd = 0, psy = 0,
-              sex = "Male", weekend = "Weekday"),
-  # BD risk
-  expand.grid(age = age_seq, mdd = 0, bd = 1, psy = 0,
-              sex = "Male", weekend = "Weekday"),
-  # Psy risk
-  expand.grid(age = age_seq, mdd = 0, bd = 0, psy = 1,
-              sex = "Male", weekend = "Weekday")
-)
-
-# Rebuild newdat with proper factors
-newdat <- newdat %>%
-  mutate(
-    mdd      = factor(mdd, levels = levels(merged$mdd)),
-    bd       = factor(bd,  levels = levels(merged$bd)),
-    psy      = factor(psy, levels = levels(merged$psy)),
-    sex      = factor(sex, levels = levels(merged$sex)),
-    weekend  = factor(weekend, levels = levels(merged$weekend)),
-    fid        = factor(levels(merged$fid)[1], levels = levels(merged$fid)),
-    subject_id = factor(levels(merged$subject_id)[1], levels = levels(merged$subject_id))
-  )
-
-
-# Assign group labels
-newdat <- newdat %>%
-  mutate(
-    group = case_when(
-      mdd == 1 ~ "MDD Risk",
-      bd  == 1 ~ "BD Risk",
-      psy == 1 ~ "Psy Risk",
-      TRUE     ~ "Control"
-    ),
-    group = factor(group, levels = c("Control", "MDD Risk", "BD Risk", "Psy Risk")),
-    fid = factor(levels(merged$fid)[1], levels = levels(merged$fid)),
-    subject_id = factor(levels(merged$subject_id)[1], levels = levels(merged$subject_id))
-  )
-
-newdat$fit <- predict(linear2_exploration, newdata = newdat, re.form = NA, allow.new.levels = TRUE)
-
-library(ggplot2)
-
-sumdat <- merged %>%
-  group_by(filename) %>%
-    summarise(
-      WAKEUPm = mean(wakeup, na.rm = TRUE),
-      age = mean(age, na.rm = TRUE),
-      group = first(group)
-    )
-
-yep2 <- ggplot(newdat, aes(x = age, y = fit, color = group)) +
-  geom_line(linewidth = 1.2) +
+ggplot(merged, aes(x = midpoint)) +
+  geom_histogram(aes(y = ..density..),
+                 bins = 40, alpha = 0.6, color = "black") +
+  geom_density(linewidth = 1.2) +
   labs(
-    title = "Model 2",
-    x = "Age (years)",
-    y = "",   # 🔹 remove text but keep the axis space
-    color = "Group"
+    title = "Distribution of Sleep Midpoint",
+    x = "Sleep Midpoint (minutes)",
+    y = "Density"
   ) +
-  geom_point(
-    data = sumdat,
-    aes(x = age, y = WAKEUPm, color = group),
-    alpha = 0.15,
-    size = 1.2,
-    inherit.aes = FALSE
-  ) +
-  scale_y_continuous(
-    limits = c(24, 36),
-    breaks = seq(24,36, by = 2),
-    labels = c("12:00 AM", "2:00 AM", "4:00 AM",
-               "6:00 AM", "8:00 AM", "10:00 AM", "12:00 PM")
-  ) +
-  scale_x_continuous(
-    limits = c(8, 22),
-    breaks = seq(8, 22, by = 4)
-  ) +
-  scale_color_manual(
-    values = c("Control" = "skyblue",
-               "MDD Risk" = "#E69F00",
-               "BD Risk"  = "#D55E00",
-               "Psy Risk" = "#009E73")
-  ) +
-  theme_minimal(base_size = 16) +
-  theme(
-    legend.position = "top",
-    legend.direction = "horizontal",
-    legend.box = "horizontal",
-    legend.title = element_blank(),
-    legend.text  = element_text(size = 11),
-    legend.key.size = unit(0.8, "lines"),
-    legend.spacing.x = unit(0.8, "lines"),
-    legend.spacing.y = unit(0.2, "lines"),
-    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
-    panel.grid.minor = element_blank()
-  ) +
-  guides(color = guide_legend(nrow = 2, byrow = TRUE))
-
-yep2
-
-
-library(patchwork)
-MIDcombo <- yep + yep2 +
-  plot_layout(ncol = 2, widths = c(1, 1)) +
-  plot_annotation(
-    title = "Predicted Sleep Wakeup & Observed Mean Sleep Wakeup",
-    theme = theme(
-      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
-      plot.margin = margin(15, 15, 15, 15)
-    )
-  )
-MIDcombo
-ggsave(
-  "Wakeup_Patchwork.png",
-  plot = MIDcombo,
-  width = 8.5, height = 6.5, units = "in", dpi = 600,
-  bg = "white"
-)
-```
-
-
-##Mid Point
-```{r}
-merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
-
-
-nonlinear <- gamm(
-  sleep_midpoint_min_adj ~ fhr + sex + weekend + 
-    s(age, by = fhr, k = 5),        # additional smooth for FHR
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-nonlinear_order <- gamm(
-  sleep_midpoint_min_adj ~ fhr + sex + weekend + s(age, k = 5) +
-    s(age, by = fhr2, k = 5),        # additional smooth for FHR
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-
-summary(nonlinear_order$gam)
-
-##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p <- signif(0.134 * 3, 3)
-p <- format(p, scientific = FALSE)
-p
-
-f <- 1.46
+  theme_minimal(base_size = 16)
 ```
 
 
 
-###Midpoint
-```{r}
-age_seq <- seq(min(merged$age), max(merged$age), length.out = 200)
-
-# Create a new data frame with average covariate values
-newdat <- expand.grid(
-  age = age_seq,
-  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
-)
-
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-
-pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
-
-newdat$fit <- pred$fit
-newdat$se <- pred$se.fit
-z <- qnorm(0.99165)  # 1.96
-newdat <- newdat %>%
-  mutate(
-    lower = fit - z * se,
-    upper = fit + z * se
-  )
-
-# 6. Plot adjusted smooths for groups with ggplot
-sum <- merged %>%
-  group_by(filename) %>%
-    summarise(
-      MIDm = mean(sleep_midpoint_min_adj, na.rm = TRUE)/60,
-      age = mean(age, na.rm = TRUE),
-      fhr = first(fhr)
-    )
-
-mgcv::plot.gam(nonlinear$gam)
-MIDoutput <- ggplot() +
-  # Raw data
-  geom_point(data = sum,
-             aes(x = age, y = MIDm, color = fhr),
-             alpha = 0.25, size = 1.2) +
-  
-  # Model predictions
-  geom_line(data = newdat,
-            aes(x = age, y = fit/60, color = fhr),
-            size = 1.2) +
-  geom_ribbon(data = newdat,
-              aes(x = age, ymin = lower/60, ymax = upper/60, fill = fhr),
-              alpha = 0.25, color = NA) +
-  
-  # Scales (match both color & fill and give them the same legend title)
-  scale_color_manual(
-    name = "Group",                # 👈 ensures both share same legend title
-    values = c("Control" = "#6699FF", "FHR" = "#FF6666")
-  ) +
-  scale_fill_manual(
-    name = "Group",                # 👈 must be identical to color's 'name'
-    values = c("Control" = "#6699FF", "FHR" = "#FF6666")
-  ) +
-  
-scale_y_continuous(
-  limits = c(0, 8),
-  breaks = seq(0, 8, by = 2),
-  labels = c("12:00 AM", "2:00 AM", "4:00 AM", "6:00 AM", "8:00 AM")
-) +
-  labs(
-    title = "Observed and Modelled Sleep Midpoint by Group",
-    x = "Age",
-    y = "Sleep Midpoint"
-  ) +
-  theme_minimal()
-MIDoutput
-
-ggsave(
-  "Midpoint_SleepTrajectories99CI.png",
-  plot = last_plot(),
-  width = 6.9, height = 4.6, units = "in", dpi = 300,
-  bg = "white"
-)
 
 
-diff <- difference_smooths(nonlinear$gam,
-                           select = "s(age)",
-                           by = "fhr",
-                           comp = list(fhr = c("FHR", "Control")))
-
-MIDdiff <- ggplot(diff, aes(x = age, y = .diff)) +
-  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
-  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
-              fill = "#B380B3", alpha = 0.4) +
-  geom_line(color = "#B380B3", linewidth = 1.3) +
-  ggtitle("Difference in Sleep Midpoint (FHR - Control)") +
-  xlab("Age") +
-  ylab("Difference in Predicted Sleep Midpoint") +
-  theme_minimal() +
-  annotate(
-    "text",
-    x = min(diff$age, na.rm = TRUE),
-    y = min(diff$.lower_ci, na.rm = TRUE),
-    label = as.character(
-      as.expression(
-        bquote(bold(italic("p"))[Bonf.] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
-      )
-    ),
-    parse = TRUE,
-    hjust = 0, vjust = -1, size = 4.2
-  )
-
-MIDdiff
-
-
-
-MIDoutput <- MIDoutput +
-  theme(
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
-MIDdiff <- MIDdiff +
-  theme(
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-MIDcombo <- MIDoutput + MIDdiff +
-  plot_layout(ncol = 2, widths = c(1, 1)) +
-  plot_annotation(
-    title = "Sleep Midpoint Trajectories and Group Differences",
-    theme = theme(
-      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
-      plot.margin = margin(15, 15, 15, 15)
-    )
-  )
-MIDcombo
-ggsave(
-  "MID_Patchwork.png",
-  plot = MIDcombo,
-  width = 8.5, height = 6.5, units = "in", dpi = 600,
-  bg = "white"
-)
-```
-
-
-
-```{r}
-summary(merged$sleep_midpoint_min)
-
-ggplot(merged, aes(x = sleep_midpoint_min_adj)) +
-  geom_histogram(binwidth = 30, color = "white", fill = "#6699FF") +
-  labs(
-    title = "Distribution of Sleep Midpoint (minutes)",
-    x = "Sleep Midpoint (minutes from midnight)",
-    y = "Count"
-  ) +
-  theme_minimal()
-
-merged %>%
-  filter(sleep_midpoint_min_adj < -200) %>%
-  select(filename, subject_id, age, fhr, sleep_midpoint_min, sleep_midpoint_min_adj, sleeponset, wakeup) %>%
-  arrange(desc(sleep_midpoint_min_adj))
-
-
-
-
-linear <- lmer(sleep_midpoint_min_adj ~ fhr*age + sex + weekend + (1|fid/ subject_id), data = merged)
-summary()
-```
 
 
