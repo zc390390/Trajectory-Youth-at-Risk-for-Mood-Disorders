@@ -53,8 +53,8 @@ library(ggplot2)     # General plotting
 
 #Non-Mean Exploration
 ```{r}
-setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+# setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
+setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
 # setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
 
@@ -235,12 +235,20 @@ merged$SleepDurationInSpt <- as.numeric(merged$SleepDurationInSpt)
 
 #Remove Psy Risk and Those without gruop
 merged <- merged %>% filter(age >= 8 & age <= 22)
+merged1 <- merged
 merged <- merged %>% filter(group != 'Psy Risk')
 
 table(merged$group)
+
+merged1 <- merged1 %>%
+  mutate(
+    mdd = factor(ifelse(group == "MDD Risk", 1, 0), levels = c(0, 1)),
+    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1)),
+    psy = factor(ifelse(group == "Psy Risk", 1, 0), levels = c(0, 1))
+  )
 ```
 #Main Analysis
-##SRI
+##Linear
 ```{r}
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
 
@@ -267,9 +275,12 @@ p <- signif(9.44e-05 * 3, 3)
 p <- format(p, scientific = FALSE)
 p <- ifelse(p < 0.001, "<0.001", format(signif(p, 3), scientific = FALSE))
 p
+
+##FDR
+p <- 0.000282
 ```
 
-##Visualization
+###Visualization
 ```{r}
 # Create new data for prediction (age sequence)
 age_seq <- seq(min(merged$age, na.rm = TRUE),
@@ -291,7 +302,7 @@ pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(sub
 
 newdat$fit <- pred$fit
 newdat$se <- pred$se.fit
-z <- qnorm(0.99165)  # 1.96
+z <- qnorm(0.975)  # 1.96
 newdat <- newdat %>%
   mutate(
     lower = fit - z * se,
@@ -379,7 +390,7 @@ SRIdiff <- ggplot(diff, aes(x = age, y = .diff)) +
     y = min(diff$.lower_ci, na.rm = TRUE),
     label = as.character(
       as.expression(
-        bquote(bold(italic("p"))[Bonf.] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
+        bquote(bold(italic("p"))[BH] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
       )
     ),
     parse = TRUE,
@@ -434,3 +445,223 @@ ggsave(
   bg = "white"
 )
 ```
+
+##Nonlinear
+###Main
+```{r}
+##Mid Point
+merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
+
+
+nonlinear <- gamm(
+  SRI2_scaled ~ fhr + sex + weekend + 
+    s(age, by = fhr, k = 5),        # additional smooth for FHR
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+nonlinear_order <- gamm(
+  SRI2_scaled ~ fhr2 + sex + weekend + s(age, k = 5) +
+    s(age, by = fhr2, k = 5),        # additional smooth for FHR
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+
+summary(nonlinear_order$gam)
+summary(nonlinear$gam)
+
+##Below p value is from the summary, there is likely a way to automate finding it but I dont care
+p <- signif(9.44e-05 * 3)
+p <- format(p, scientific = FALSE)
+p
+
+f <- 7
+
+#fdr
+p <- 0.0002
+```
+###Visualization of Main Results
+```{r}
+#Take The Smooths of Both of our Groups
+diff <- difference_smooths(nonlinear$gam,
+                           select = "s(age)",
+                           by = "fhr",
+                           comp = list(fhr = c("FHR", "Control")))
+
+age_seq <- seq(min(merged$age, na.rm = TRUE),
+               max(merged$age, na.rm = TRUE),
+               length.out = 200)
+
+# Create a new data frame with average covariate values
+newdat <- expand.grid(
+  age = age_seq,
+  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
+  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
+  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
+)
+
+# Assign one subject ID (for random effects if included)
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+
+#
+pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
+
+newdat$fit <- pred$fit
+newdat$se <- pred$se.fit
+z <- qnorm(0.975)  # 1.96
+newdat <- newdat %>%
+  mutate(
+    lower = fit - z * se,
+    upper = fit + z * se
+  )
+
+# 6. Plot adjusted smooths for groups with ggplot
+sum <- merged %>%
+  group_by(filename) %>%
+    summarise(
+      SRIm = mean(SRI2_scaled, na.rm = TRUE),
+      age = mean(age, na.rm = TRUE),
+      fhr = first(fhr)
+    )
+
+
+SRIoutput <- ggplot() +
+  # Raw data
+  geom_point(data = sum,
+             aes(x = age, y = SRIm, color = fhr),
+             alpha = 0.25, size = 1.2) +
+  
+  
+  # Model predictions
+  geom_line(data = newdat,
+            aes(x = age, y = fit, color = fhr),
+            size = 1.2) +
+    geom_ribbon(data = newdat, aes(x = age, ymin = lower, ymax = upper, fill = fhr), alpha = 0.25, color = NA) +
+  # Scales
+  scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
+  scale_fill_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
+  scale_y_continuous(limits = c(60, 100), breaks = seq(60, 100, by = 10)) +
+  labs(title = "Observed and Modelled Sleep Regularity by Group",
+       x = "Age",
+       y = "Sleep Duration (hours)",
+       color = "Group",
+       fill = "Group") +
+  theme_minimal()
+SRIoutput
+
+
+
+#Differences
+diff <- difference_smooths(
+  nonlinear, smooth = "s(age)",                          # base label of the smooth
+  n = 2000, unconditional = TRUE,
+  interval = "simultaneous", level = 0.983,        # or 0.9833 if you insist on Bonferroni across 3 outcomes
+  comp = list(fhr = c("FHR", "Control"))
+)
+
+SRIdiff <- ggplot(diff, aes(x = age, y = .diff)) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
+              fill = "#B380B3", alpha = 0.4) +
+  geom_line(color = "#B380B3", linewidth = 1.3) +
+  ggtitle("Difference in Sleep Regularity Index (FHR - Control)") +
+  xlab("Age") +
+  ylab("Difference in Predicted SRI") +
+  theme_minimal() +
+  annotate(
+    "text",
+    x = min(diff$age, na.rm = TRUE),
+    y = min(diff$.lower_ci, na.rm = TRUE),
+    label = as.character(
+      as.expression(
+        bquote(bold(italic("p"))[Bonf.] ~ "< 0.001")
+      )
+    ),
+    parse = TRUE,
+    hjust = 0, vjust = -1, size = 4.2
+  )
+SRIdiff
+
+SRIoutput <- SRIoutput +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+SRIdiff <- SRIdiff +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+
+library(patchwork)
+SRIcombo <- SRIoutput + SRIdiff +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    title = "Sleep Regularity Trajectories and Group Differences",
+    theme = theme(
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      plot.margin = margin(15, 15, 15, 15)
+    )
+  )
+SRIcombo
+
+ggsave(
+  "SRI_Patchwork.png",
+  plot = SRIcombo,
+  width = 8.5, height = 6.5, units = "in", dpi = 600,
+  bg = "white"
+)
+```
+
+####Group
+#####MDD
+```{r}
+merged_MDD <- subset(merged, group2 %in% c("Control", "MDD Risk"))
+merged_MDD$MDD <- droplevels(merged_MDD$group2)
+table(merged_MDD$group2)
+
+nonlinear_order <- gamm(
+  SRI2_scaled ~ MDD + sex + weekend + s(age, k = 5) +
+    s(age, by = MDD, k = 5),  # one smooth per group
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged_MDD,
+  method = "REML"
+)
+
+summary(nonlinear_order$gam)
+```
+######Visualization
+```{r}
+
+```
+
+
+#####BD
+```{r}
+merged_BD <- subset(merged, group2 %in% c("Control", "BD Risk"))
+merged_BD$BD <- droplevels(merged_BD$group2)
+table(merged_BD$BD)
+
+m_gamm <- gamm(
+  SRI2_scaled ~ BD + sex + weekend +
+    s(age, k = 7) +
+    s(age, by = BD, k = 7),
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged_BD,
+  method = "REML"
+)
+
+m <- m_gamm$gam   # for gratia
+
+summary(m)
+```
+######Visualization
+```{r}
+
+```
+

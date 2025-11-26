@@ -54,8 +54,8 @@ library(ggplot2)     # General plotting
 #Data Setup
 ##Cleaning Actirgaph and Merging
 ```{r}
-setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+# setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
+setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
 # setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
 
@@ -158,13 +158,19 @@ merged$SleepDurationInSpt <- as.numeric(merged$SleepDurationInSpt)
 
 #Remove Psy Risk and Those without gruop
 merged <- merged %>% filter(age >= 8 & age <= 22)
+merged1 <- merged
 merged <- merged %>% filter(group != 'Psy Risk')
 
-table(merged$group)
+merged1 <- merged1 %>%
+  mutate(
+    mdd = factor(ifelse(group == "MDD Risk", 1, 0), levels = c(0, 1)),
+    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1)),
+    psy = factor(ifelse(group == "Psy Risk", 1, 0), levels = c(0, 1))
+  )
 ```
 
 #Main Analysis
-##TST
+##Nonlinear
 ```{r}
 #This will show difference in smooth factors
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
@@ -190,11 +196,15 @@ summary(nonlinear_order$gam)
 ##Below p value is from the summary, there is likely a way to automate finding it but I dont care
 p <- signif(0.00606 * 3, 3)
 p <- format(p, scientific = FALSE)
-p <- ifelse(p < 0.001, "<0.001", format(signif(p, 3), scientific = FALSE))
+#p <- ifelse(p < 0.001, "<0.001", format(signif(p, 3), scientific = FALSE))
 p
+
+#FDR
+p <- 0.00909
+
 ```
 
-##Visualization
+###Visualization
 ```{r}
 #Take The Smooths of Both of our Groups
 diff <- difference_smooths(nonlinear$gam,
@@ -227,19 +237,21 @@ newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject
 pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
 
 newdat$fit <- pred$fit
-newdat$se <- pred$se.fit
-z <- qnorm(0.975)  # 1.96
-newdat <- newdat %>%
-  mutate(
-    lower = fit - z * se,
-    upper = fit + z * se
-  )
+ newdat$se <- pred$se.fit
+ z <- qnorm(0.975)  # 1.96
+ newdat <- newdat %>%
+   mutate(
+     lower = fit - z * se,
+     upper = fit + z * se
+   )
 
 # 6. Plot adjusted smooths for groups with ggplot
 
 ggplot(newdat, aes(x = age, y = fit, color = fhr)) +
   geom_line(size = 1.2) +
-  geom_ribbon(aes(ymin = lower, ymax = upper, fill = fhr), alpha = 0.2, color = NA) +
+    geom_ribbon(data = newdat,
+              aes(x = age, ymin = lower, ymax = upper, fill = fhr),
+              alpha = 0.25, color = NA) +
   scale_y_continuous(limits = c(4, 10), breaks = seq(4, 10, by = 2)) +
 scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
 scale_fill_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
@@ -270,9 +282,6 @@ TSToutput <- ggplot() +
   geom_line(data = newdat,
             aes(x = age, y = fit, color = fhr),
             size = 1.2) +
-  geom_ribbon(data = newdat,
-              aes(x = age, ymin = lower, ymax = upper, fill = fhr),
-              alpha = 0.25, color = NA) +
   
   # Scales
   scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
@@ -310,7 +319,7 @@ TSTdiff <- ggplot(diff, aes(x = age, y = .diff)) +
     y = min(diff$.lower_ci, na.rm = TRUE),
     label = as.character(
       as.expression(
-        bquote(bold(italic("p"))[Bonf.] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
+        bquote(bold(italic("p"))[BH] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
       )
     ),
     parse = TRUE,
@@ -335,7 +344,7 @@ library(patchwork)
 TSTcombo <- TSToutput + TSTdiff +
   plot_layout(ncol = 2, widths = c(1, 1)) +
   plot_annotation(
-    title = "Sleep Regularity Trajectories and Group Differences",
+    title = "Sleep Duration Trajectories and Group Differences",
     theme = theme(
       plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
       plot.margin = margin(15, 15, 15, 15)
@@ -354,7 +363,11 @@ ggsave(
 
 ```
 
-
+#Exploration
+```{r}
+linear <- lmer(SleepDurationInSpt ~ age*mdd + age*bd + age*psy + sex + weekend + (1|fid/subject_id), data = merged1)
+summary(linear)
+```
 
 #Non-Mean Graphing
 ##Density plot
