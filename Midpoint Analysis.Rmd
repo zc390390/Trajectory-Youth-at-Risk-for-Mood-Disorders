@@ -55,11 +55,11 @@ output: html_document
 #Load Data
 ```{r}
 # setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-# setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
+setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
 
-FOR <- readr::read_csv("FOR.csv", col_types = cols(.default = col_character())) 
+FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character())) 
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character())) 
 NightM <- read_excel("motionloggerdata.xlsx")
 ```
@@ -400,6 +400,95 @@ ggsave(
 
 
 ```
+
+###Table
+```{R}
+library(dplyr)
+library(flextable)
+library(broom.mixed)
+library(tibble)
+
+#========================
+# FIXED EFFECTS
+#========================
+mod1 <- broom.mixed::tidy(nonlinear_order$lme,
+                          effects = "fixed",
+                          conf.int = TRUE)
+
+# remove spline basis coefficients
+mod1 <- mod1 %>% filter(!grepl("^Xs", term))
+
+format_model <- function(model_df) {
+  model_df %>%
+    mutate(
+      term = recode(term,
+        "X(Intercept)"        = "Intercept",
+        "Xfhr2.L"             = "FHR (Group)",
+        "XsexFemale"          = "Sex (Female)",
+        "XweekendWeekend"     = "Weekend"
+      ),
+      `b (SE)`   = sprintf("%.2f (%.2f)", estimate, std.error),
+      `95% CI`   = sprintf("[%.2f, %.2f]", conf.low, conf.high),
+      `p value`  = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
+    ) %>%
+    select(term, `b (SE)`, `95% CI`, `p value`)
+}
+
+tbl_fixed <- format_model(mod1)
+
+#========================
+# SMOOTH TERMS
+#========================
+smooth_table <- as.data.frame(summary(nonlinear_order$gam)$s.table)
+
+tbl_smooth <- smooth_table %>%
+  tibble::rownames_to_column("term") %>%
+  mutate(
+    term = recode(
+      term,
+      "s(age)"             = "Smooth(Age)",
+      "s(age):fhr2FHR"     = "Smooth(Age) × FHR"
+    ),
+    edf = sprintf("%.2f", edf),
+    F   = sprintf("%.2f", F),
+    `p value` = ifelse(`p-value` < .001, "<.001", sprintf("%.3f", `p-value`))
+  ) %>%
+  select(term, edf, F, `p value`)
+
+#========================
+# BUILD ONE TABLE
+#========================
+# Create divider row
+divider <- tibble(
+  term = "Smooth Terms",
+  `b (SE)` = NA,
+  `95% CI` = NA,
+  `p value` = NA
+)
+
+# Rename smooth-term columns to match fixed layout
+tbl_smooth_fmt <- tbl_smooth %>%
+  rename(`b (SE)` = edf,
+         `95% CI` = F)
+
+# Bind everything together
+combined_df <- bind_rows(
+  tbl_fixed,
+  divider,
+  tbl_smooth_fmt
+)
+
+combined_table <- flextable(combined_df) %>%
+  set_caption("Model: Midpoint of Sleep — General Additive Model") %>%
+  bold(i = nrow(tbl_fixed) + 1, j = 1) %>%   # bold the "Smooth Terms" row
+  autofit()
+
+save_as_docx(
+  "Model: Midpoint of Sleep — GAM" = combined_table,
+  path = "MID_GAM_Table.docx"
+)
+```
+
 
 
 ###Group

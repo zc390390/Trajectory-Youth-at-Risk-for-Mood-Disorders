@@ -55,9 +55,9 @@ library(ggplot2)     # General plotting
 ##Cleaning Actirgaph and Merging
 ```{r}
 # setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-# setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
+setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
 
 FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
@@ -246,23 +246,6 @@ newdat$fit <- pred$fit
    )
 
 # 6. Plot adjusted smooths for groups with ggplot
-
-ggplot(newdat, aes(x = age, y = fit, color = fhr)) +
-  geom_line(size = 1.2) +
-    geom_ribbon(data = newdat,
-              aes(x = age, ymin = lower, ymax = upper, fill = fhr),
-              alpha = 0.25, color = NA) +
-  scale_y_continuous(limits = c(4, 10), breaks = seq(4, 10, by = 2)) +
-scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
-scale_fill_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
-
-  labs(title = "Adjusted Sleep Duration Trajectories by Group",
-       x = "Age",
-       y = "Predicted Sleep Duration (hours)",
-       color = "Group",
-       fill = "Group") +
-  theme_minimal()
-
 sum <- merged %>%
   group_by(filename) %>%
     summarise(
@@ -278,10 +261,12 @@ TSToutput <- ggplot() +
              aes(x = age, y = TSTm, color = fhr),
              alpha = 0.25, size = 1.2) +
   
+  
   # Model predictions
   geom_line(data = newdat,
             aes(x = age, y = fit, color = fhr),
             size = 1.2) +
+     geom_ribbon(data = newdat, aes(x = age, ymin = lower, ymax = upper, fill = fhr), alpha = 0.25, color = NA) +
   
   # Scales
   scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
@@ -319,7 +304,7 @@ TSTdiff <- ggplot(diff, aes(x = age, y = .diff)) +
     y = min(diff$.lower_ci, na.rm = TRUE),
     label = as.character(
       as.expression(
-        bquote(bold(italic("p"))[BH] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
+        bquote(bold(italic("p"))[BH] ~ "= 0.009")
       )
     ),
     parse = TRUE,
@@ -359,9 +344,97 @@ ggsave(
   width = 8.5, height = 6.5, units = "in", dpi = 600,
   bg = "white"
 )
+```
 
+###Table output
+```{r}
+library(dplyr)
+library(flextable)
+library(broom.mixed)
+library(tibble)
+
+#========================
+# FIXED EFFECTS
+#========================
+mod1 <- broom.mixed::tidy(nonlinear_order$lme,
+                          effects = "fixed",
+                          conf.int = TRUE)
+
+# remove spline basis coefficients
+mod1 <- mod1 %>% filter(!grepl("^Xs", term))
+
+format_model <- function(model_df) {
+  model_df %>%
+    mutate(
+      term = recode(term,
+        "X(Intercept)"        = "Intercept",
+        "Xfhr2.L"             = "FHR (Group)",
+        "XsexFemale"          = "Sex (Female)",
+        "XweekendWeekend"     = "Weekend"
+      ),
+      `b (SE)`   = sprintf("%.2f (%.2f)", estimate, std.error),
+      `95% CI`   = sprintf("[%.2f, %.2f]", conf.low, conf.high),
+      `p value`  = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
+    ) %>%
+    select(term, `b (SE)`, `95% CI`, `p value`)
+}
+
+tbl_fixed <- format_model(mod1)
+
+#========================
+# SMOOTH TERMS
+#========================
+smooth_table <- as.data.frame(summary(nonlinear_order$gam)$s.table)
+
+tbl_smooth <- smooth_table %>%
+  tibble::rownames_to_column("term") %>%
+  mutate(
+    term = recode(
+      term,
+      "s(age)"             = "Smooth(Age)",
+      "s(age):fhr2FHR"     = "Smooth(Age) × FHR"
+    ),
+    edf = sprintf("%.2f", edf),
+    F   = sprintf("%.2f", F),
+    `p value` = ifelse(`p-value` < .001, "<.001", sprintf("%.3f", `p-value`))
+  ) %>%
+  select(term, edf, F, `p value`)
+
+#========================
+# BUILD ONE TABLE
+#========================
+# Create divider row
+divider <- tibble(
+  term = "Smooth Terms",
+  `b (SE)` = NA,
+  `95% CI` = NA,
+  `p value` = NA
+)
+
+# Rename smooth-term columns to match fixed layout
+tbl_smooth_fmt <- tbl_smooth %>%
+  rename(`b (SE)` = edf,
+         `95% CI` = F)
+
+# Bind everything together
+combined_df <- bind_rows(
+  tbl_fixed,
+  divider,
+  tbl_smooth_fmt
+)
+
+combined_table <- flextable(combined_df) %>%
+  set_caption("Model: Total Sleep Time — General Additive Model") %>%
+  bold(i = nrow(tbl_fixed) + 1, j = 1) %>%   # bold the "Smooth Terms" row
+  autofit()
+
+save_as_docx(
+  "Model: Total Sleep Time — GAM" = combined_table,
+  path = "TST_GAM_Table.docx"
+)
 
 ```
+
 
 #Exploration
 ```{r}
