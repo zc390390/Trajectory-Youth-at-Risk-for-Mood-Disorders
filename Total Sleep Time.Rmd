@@ -436,6 +436,55 @@ save_as_docx(
 ```
 
 
+###Basis fucntions
+```{r}
+b <- gam(
+  SleepDurationInSpt ~ fhr + sex + weekend + s(age, by = fhr, k = 5),
+  data = merged,
+  fit = FALSE
+)
+
+X <- b$X
+colnames(X) <- paste0("basis_", seq_len(ncol(X)))
+
+basis_df <- data.frame(
+  age = merged$age,
+  fhr = merged$fhr,
+  X
+)
+
+basis_long <- basis_df %>%
+  pivot_longer(starts_with("basis_"),
+               names_to = "basis",
+               values_to = "value") %>%
+  filter(!basis %in% paste0("basis_", 1:4))
+
+
+p <- ggplot() +
+  geom_line(
+    data = basis_long,
+    aes(x = age, y = value + 7.75, group = basis, color = basis),
+    linewidth = 0.9
+  ) +
+  geom_point(
+    data = sum,
+    aes(x = age, y = TSTm, color = fhr),
+    alpha = 0.25, size = 1.2
+  ) +
+  facet_wrap(~fhr) +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Basis functions and observed data for TST",
+    x = "Age",
+    y = "Total Sleep Time (hours)"
+  )
+
+ggsave("basis_tst_plot.png", p, width = 12, height = 6, dpi = 300)
+
+
+
+```
+
 #Exploration
 ```{r}
 linear <- lmer(SleepDurationInSpt ~ age*mdd + age*bd + age*psy + sex + weekend + (1|fid/subject_id), data = merged1)
