@@ -577,7 +577,7 @@ SRIdiff <- ggplot(diff, aes(x = age, y = .diff)) +
     y = min(diff$.lower_ci, na.rm = TRUE),
     label = as.character(
       as.expression(
-        bquote(bold(italic("p"))[Bonf.] ~ "< 0.001")
+        bquote(bold(italic("p"))[BH] ~ "< 0.001")
       )
     ),
     parse = TRUE,
