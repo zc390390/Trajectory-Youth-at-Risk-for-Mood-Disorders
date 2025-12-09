@@ -34,6 +34,7 @@ library(lsmeans)     # Least-squares means (now emmeans)
 library(mgcv)        # Generalized Additive Models
 library(gratia)      # GAM diagnostics & visualization
 library(gamm4)       # GAMM fitting
+library(patchwork)
 
 ## ─────────────────────────────
 ## 📑 Tables & Reporting
@@ -222,12 +223,18 @@ merged <- merged %>%
 #Main Analysis
 ##Linear
 ```{r}
+merged <- merged %>%
+  mutate(
+    SRI2_scaled2 = log(100 - SRI2_scaled)
+  ) %>%
+  filter(is.finite(SRI2_scaled2))
+
 #Yep
 mod1 <- lmer(SRI2_scaled ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
 summary(mod1)
 
 #Groups
-mod2 <- lmer(SRI2_scaled ~ age*mdd + age*bd + sex + weekend + (1|fid/subject_id), data = merged)
+mod2 <- lmer(SRI2_scaled ~ age*group + sex + weekend + (1|fid/subject_id), data = merged)
 summary(mod2)
 ```
 
@@ -243,8 +250,8 @@ apa_format <- function(model){
         "fhrFHR:age"      = "FHR × Age",
         "mdd1"            = "MDD",
         "bd1"             = "BD",
-        "age:mdd1"        = "Age × MDD",
-        "age:bd1"         = "Age × BD",
+        "age:groupMDD Risk"        = "Age × MDD",
+        "age:groupBD Risk"         = "Age × BD",
         "sexFemale"       = "Sex (Female)",
         "weekendWeekend"  = "Weekend"
       ),
@@ -314,7 +321,166 @@ save_as_docx(
 ```
 ###Visualisation
 ```{r}
+pred <- predict(
+  mod1,
+  newdata = newdat,
+  re.form = NA,     # population-level predictions
+  se.fit  = TRUE
+)
 
+newdat$fit_star <- pred$fit
+newdat$se_star  <- pred$se.fit
+
+
+# --- 4. Build 95% CI on transformed scale ---
+z <- qnorm(0.975)
+
+newdat$lower_star <- newdat$fit_star - z * newdat$se_star
+newdat$upper_star <- newdat$fit_star + z * newdat$se_star
+
+
+# --- 5. Smearing correction (bias fix) ---
+smear <- mean(exp(resid(mod1)), na.rm = TRUE)
+
+
+# --- 6. Back-transform to ORIGINAL SRI SCALE (with bound flip) ---
+newdat$fit   <- 100 - smear * exp(newdat$fit_star)
+
+# --- 7. Observed data on ORIGINAL SCALE (unchanged) ---
+sum <- merged %>%
+  group_by(filename) %>%
+  summarise(
+    SRIm = mean(SRI2_scaled, na.rm = TRUE),  # original SRI
+    age  = mean(age, na.rm = TRUE),
+    fhr  = first(fhr)
+  )
+
+
+# --- 8. Final plot: transformed model shown on ORIGINAL scale ---
+SRIoutput1 <- ggplot() +
+  geom_point(
+    data = sum,
+    aes(x = age, y = SRIm, color = fhr),
+    alpha = 0.25, size = 1.2
+  ) +
+  geom_line(
+    data = newdat,
+    aes(x = age, y = fit, color = fhr),
+    size = 1.2
+  ) +
+  scale_color_manual(values = c("Control" = "lightblue", "FHR" = "darkorange")) +
+  scale_fill_manual(values  = c("Control" = "lightblue", "FHR" = "darkorange")) +
+  scale_y_continuous(limits = c(60, 100), breaks = seq(60, 100, 10)) +
+  labs(
+    title = "Transformed Model (Back-transformed to Original SRI Scale)",
+    x = "Age",
+    y = "Sleep Regularity",
+    color = "Group",
+    fill  = "Group"
+  ) +
+  theme_minimal()
+SRIoutput1
+
+#Graph 2
+age_seq <- seq(
+  min(merged$age, na.rm = TRUE),
+  max(merged$age, na.rm = TRUE),
+  length.out = 200
+)
+
+# 1. Prediction dataframe
+newdat <- expand.grid(
+  age     = age_seq,
+  group   = c("Control", "MDD Risk", "BD Risk"),        # <-- CORRECT
+  sex     = levels(merged$sex)[1],       # hold constant
+  weekend = levels(merged$weekend)[1]    # hold constant
+)
+
+# Ensure factor structure matches the model
+newdat <- newdat %>%
+  mutate(
+    group   = factor(group,   levels = levels(merged$group)),
+    sex     = factor(sex,     levels = levels(merged$sex)),
+    weekend = factor(weekend, levels = levels(merged$weekend)),
+    fid = merged$fid[1],               # valid RE levels
+    subject_id = merged$subject_id[1]
+  )
+
+# 2. Add valid random-effect IDs
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+newdat$fid        <- factor(merged$fid[1], levels = levels(merged$fid))
+
+# 3. Predict SRI, excluding RE if needed
+pred <- predict(
+  mod2,
+  newdata = newdat,
+  re.form = NA,    # fixed effects only
+  se.fit  = FALSE
+)
+
+newdat$fit <- pred
+
+sum <- merged %>%
+  filter(group %in% c("Control", "MDD Risk", "BD Risk")) %>%   # keep only these
+  group_by(filename) %>%
+  summarise(
+    SRIm  = mean(SRI2_scaled, na.rm = TRUE),
+    age   = mean(age, na.rm = TRUE),
+    group = first(group)
+  )
+
+
+SRIoutput2 <- ggplot() +
+  geom_point(data = sum,
+             aes(x = age, y = SRIm, color = group),
+             alpha = 0.25, size = 1.2) +
+  geom_line(data = newdat,
+            aes(x = age, y = fit, color = group),
+            size = 1.2) +
+  scale_color_manual(values = c(
+    "Control" = "lightblue",
+    "MDD Risk"     = "darkorange",
+    "BD Risk"      = "darkred"
+  )) +
+  scale_y_continuous(limits = c(60,100), breaks = seq(60,100,10)) +
+  labs(
+    title = "Model 2",
+    x = "Age",
+    y = "Sleep Regularity",
+    color = "Group"
+  ) +
+  theme_minimal()
+SRIoutput2
+
+SRIoutput1 <- SRIoutput1 + theme(legend.position = "top") + theme(legend.title = element_blank()) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+SRIoutput2 <- SRIoutput2 + ylab(NULL) + theme(legend.position = "top") + theme(legend.title = element_blank()) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+SRIcombo <- SRIoutput1 + SRIoutput2 +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    title = "Observed and Modelled Sleep Regularity Trajectories by Group",
+    theme = theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      plot.margin = margin(15, 15, 15, 15)
+    )
+  )
+SRIcombo
+
+ggsave(
+  "SRI_Patchwork_Linear.png",
+  plot = SRIcombo,
+  width = 8.5, height = 6.5, units = "in", dpi = 600,
+  bg = "white"
+)
 
 ```
 
@@ -327,11 +493,9 @@ merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
 linear <- lmer(SRI2_scaled ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
 
 
-
-
 nonlinear <- gamm(
   SRI2_scaled ~ fhr + sex + weekend + 
-    s(age, bs="ts", by = fhr, k = 10),        # additional smooth for FHR
+    s(age, by = fhr, k = 5),        # additional smooth for FHR
   random = list(fid = ~1, subject_id = ~1),
   data = merged,
   method = "REML"
@@ -339,25 +503,26 @@ nonlinear <- gamm(
 
 nonlinear_order <- gamm(
   SRI2_scaled ~ fhr2 + sex + weekend + s(age, k = 5) +
-    s(age, bs="ts", by = fhr2, k = 5), family = betar() +       # additional smooth for FHR
+    s(age, by = fhr2, k = 5),       # additional smooth for FHR
   random = list(fid = ~1, subject_id = ~1),
   data = merged,
   method = "REML"
 )
+summary(nonlinear_order$gam)
+
+BIC(linear, nonlinear_order$lme)
 
 gam.check(nonlinear_order$gam)
 
 ##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p <- signif(9.44e-05 * 3)
-p <- format(p, scientific = FALSE)
-p
+p_sri <- 0.00764
+pbonf_sri <- 0.00764*3 
 
-f <- 7
 
-#fdr
-p <- 0.0002
 ```
-####Visualization of Main Results
+
+####Visualization
+#####Graph A
 ```{r}
 #Take The Smooths of Both of our Groups
 diff <- difference_smooths(nonlinear$gam,
@@ -423,42 +588,76 @@ SRIoutput <- ggplot() +
        y = "Sleep Duration (hours)",
        color = "Group",
        fill = "Group") +
+  annotate(
+  "text",
+  x = min(newdat$age) + 0.5,
+  y = 62,
+  label = expression(bold(italic("p"))[BONF.] == 0.022),
+  parse = TRUE,
+  hjust = 0
+) +
   theme_minimal()
 SRIoutput
+```
 
-
-
+#####Graph B
+```{R}
 #Differences
-diff <- difference_smooths(
-  nonlinear, smooth = "s(age)",                          # base label of the smooth
-  n = 2000, unconditional = TRUE,
-  interval = "simultaneous", level = 0.983,        # or 0.9833 if you insist on Bonferroni across 3 outcomes
-  comp = list(fhr = c("FHR", "Control"))
-)
+bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
 
-SRIdiff <- ggplot(diff, aes(x = age, y = .diff)) +
-  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
-  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
-              fill = "#B380B3", alpha = 0.4) +
-  geom_line(color = "#B380B3", linewidth = 1.3) +
-  ggtitle("Difference in Sleep Regularity Index (FHR - Control)") +
-  xlab("Age") +
-  ylab("Difference in Predicted SRI") +
-  theme_minimal() +
-  annotate(
-    "text",
-    x = min(diff$age, na.rm = TRUE),
-    y = min(diff$.lower_ci, na.rm = TRUE),
-    label = as.character(
-      as.expression(
-        bquote(bold(italic("p"))[BH] ~ "< 0.001")
-      )
-    ),
-    parse = TRUE,
-    hjust = 0, vjust = -1, size = 4.2
-  )
+
+SRIdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
+  
+  geom_hline(yintercept = 0, linewidth = 0.8) + 
+  
+  scale_x_continuous(
+  limits = c(8, 25),
+  breaks = seq(10, 25, by = 5)
+) +
+  
+    # ---- Insignificant: 8 → 18.32 ----
+  geom_ribbon(
+    data = subset(bands, age >= 8 & age <= 18.5),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+  
+#B380B3
+  # ---- Significant: 18.32 → 25 ----
+  geom_ribbon(
+    data = subset(bands, age >= 18.5 & age <= 23.9),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+
+  # ---- Insignificant: 8 → 18.32 ----
+  geom_ribbon(
+    data = subset(bands, age >= 23.9 & age <= 25),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+
+  geom_line(linewidth = 1.3) +
+
+  labs(
+    title = "Age-varying difference in sleep regularity",
+    x = "Age (years)",
+    y = "Difference in predicted sleep regularity"
+  ) +
+
+  theme_minimal()
+
 SRIdiff
 
+```
+
+
+#####Combo Graph
+```{r}
 SRIoutput <- SRIoutput +
   theme(
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
@@ -581,60 +780,13 @@ save_as_docx(
 )
 ```
 
-
-###Group
-#####MDD
-```{r}
-merged_MDD <- subset(merged, group2 %in% c("Control", "MDD Risk"))
-merged_MDD$MDD <- droplevels(merged_MDD$group2)
-table(merged_MDD$group2)
-
-nonlinear_order <- gamm(
-  SRI2_scaled ~ MDD + sex + weekend + s(age, k = 5) +
-    s(age, by = MDD, k = 5),  # one smooth per group
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged_MDD,
-  method = "REML"
-)
-
-summary(nonlinear_order$gam)
-```
-######Visualization
-```{r}
-
-```
-
-
-#####BD
-```{r}
-merged_BD <- subset(merged, group2 %in% c("Control", "BD Risk"))
-merged_BD$BD <- droplevels(merged_BD$group2)
-table(merged_BD$BD)
-
-m_gamm <- gamm(
-  SRI2_scaled ~ BD + sex + weekend +
-    s(age, k = 7) +
-    s(age, by = BD, k = 7),
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged_BD,
-  method = "REML"
-)
-
-m <- m_gamm$gam   # for gratia
-
-summary(m)
-```
-######Visualization
-```{r}
-
-```
-
-
-
-
-
 #Look at Sleep REgularity
 ```{r}
+ggplot(merged, aes(x = SRI2_scaled)) +
+  geom_histogram()
+
+ggplot(merged, aes(x = SRI2_scaled2)) +
+  geom_histogram()
 
 high_sri <- merged %>%
   arrange(subject_id, filename, night) %>%

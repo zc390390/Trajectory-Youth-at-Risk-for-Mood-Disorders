@@ -35,6 +35,7 @@ output: html_document
   library(mgcv)        # Generalized Additive Models
   library(gratia)      # GAM diagnostics & visualization
   library(gamm4)       # GAMM fitting
+  library(patchwork)
   
   ## ─────────────────────────────
   ## 📑 Tables & Reporting
@@ -54,10 +55,10 @@ output: html_document
 
 #Load Data
 ```{r}
-# setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
+setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
 # setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
+# setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
 
 FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character())) 
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character())) 
@@ -165,7 +166,7 @@ merged$fid <- factor(merged$fid)
 
 
 #Remove Psy Risk and Those without gruop
-merged <- merged %>% filter(age >= 8 & age <= 22)
+merged <- merged %>% filter(age >= 8)
 merged <- merged %>% filter(group != 'Psy Risk')
 
 table(merged$group)
@@ -183,8 +184,7 @@ ggplot(merged, aes(x = midpoint)) +
 merged <- merged %>%
   mutate(
     mdd = factor(ifelse(group == "MDD Risk", 1, 0), levels = c(0, 1)),
-    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1)),
-    psy = factor(ifelse(group == "Psy Risk", 1, 0), levels = c(0, 1))
+    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1))
   )
 
 
@@ -193,34 +193,261 @@ merged <- merged %>%
 #Main Analysis
 ##Linear
 ```{r}
-merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
+mod1 <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
+summary(mod1)
 
-linear <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
-summary(linear)
+mod2 <- lmer(midpoint ~ group*age + sex + weekend + (1|fid/subject_id), data = merged)
 
-linear_exploration <- lmer(midpoint ~ mdd*age + bd*age + sex + weekend + (1|fid/subject_id), data = merged)
+summary(mod2)
 ```
 
 
-
-####Visualization Midpoint
+###Table
 ```{r}
-age_seq <- seq(min(merged$age), max(merged$age), length.out = 200)
+apa_format <- function(model){
+  tidy(model, effects = "fixed", conf.int = TRUE) %>%
+    mutate(
+      Predictor = recode(term,
+        "(Intercept)"     = "Intercept",
+        "fhrFHR"          = "FHR",
+        "age"             = "Age",
+        "fhrFHR:age"      = "FHR × Age",
+        "groupMDD Risk"            = "MDD",
+        "groupBD Risk"             = "BD",
+        "groupMDD Risk:age"        = "Age × MDD",
+        "groupBD Risk:age"         = "Age × BD",
+        "sexFemale"       = "Sex (Female)",
+        "weekendWeekend"  = "Weekend"
+      ),
+      `b (SE)` = sprintf("%.2f (%.2f)", estimate, std.error),
+      CI = sprintf("[%.2f, %.2f]", conf.low, conf.high),
+      p = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
+    ) %>%
+    select(Predictor, `b (SE)`, CI, p)
+}
 
-# Create a new data frame with average covariate values
-newdat <- expand.grid(
-  age = age_seq,
-  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
+m1 <- apa_format(mod1)
+m2 <- apa_format(mod2)
+
+combined <- full_join(
+  m1 %>% rename(b1 = `b (SE)`, CI1 = CI, p1 = p),
+  m2 %>% rename(b2 = `b (SE)`, CI2 = CI, p2 = p),
+  by = "Predictor"
 )
 
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+order_terms <- c(
+  "Intercept",
+  "FHR",
+  "Age",
+  "FHR × Age",
+  "MDD",
+  "BD",
+  "Age × MDD",
+  "Age × BD",
+  "Sex (Female)",
+  "Weekend"
+)
+
+combined <- combined %>%
+  mutate(Predictor = factor(Predictor, levels = order_terms)) %>%
+  arrange(Predictor) %>%
+  replace(is.na(.), "")
 
 
+ft <- flextable(combined) %>%
+  set_header_labels(
+    Predictor = "Predictor",
+    b1 = "β (SE)",
+    CI1 = "95% CI",
+    p1 = "p",
+    b2 = "β (SE)",
+    CI2 = "95% CI",
+    p2 = "p"
+  ) %>%
+  add_header_row(
+    values = c("", "Model 1", "Model 1", "Model 1",
+                  "Model 2", "Model 2", "Model 2"),
+    colwidths = c(1,1,1,1,1,1,1)
+  ) %>%
+  merge_h(part = "header") %>%
+  autofit() %>%
+  align(j = 2:7, align = "center") %>%
+  align(j = 1, align = "left") %>%
+  bold(part = "header")
+
+ft
+
+
+save_as_docx(
+  "Linear Mixed Models Predicting TST" = ft,
+  path = "MID_TwoModel_APA_Table.docx"
+)
 ```
 
+###Visualize
+```{r}
+#Graph 1
+age_seq <- seq(
+  min(merged$age, na.rm = TRUE),
+  max(merged$age, na.rm = TRUE),
+  length.out = 200
+)
 
+# 1. Prediction dataframe
+newdat <- expand.grid(
+  age = age_seq,
+  fhr = levels(merged$fhr),
+  sex = levels(merged$sex)[1],
+  weekend = levels(merged$weekend)[1]
+) %>%
+  mutate(
+    fhr = factor(fhr, levels = levels(merged$fhr)),
+    sex = factor(sex, levels = levels(merged$sex)),
+    weekend = factor(weekend, levels = levels(merged$weekend))
+  )
+
+# 2. Add valid random-effect IDs
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+newdat$fid        <- factor(merged$fid[1], levels = levels(merged$fid))
+
+# 3. Predict SRI, excluding RE if needed
+pred <- predict(
+  mod1,
+  newdata = newdat,
+  re.form = NA,       # <--- KEY FIX
+  se.fit = TRUE
+)
+
+
+newdat$fit <- pred$fit
+
+sum <- merged %>%
+  group_by(filename) %>%
+  summarise(
+    MIDm = mean(midpoint, na.rm = TRUE),
+    age  = mean(age, na.rm = TRUE),
+    fhr  = first(fhr)
+  )
+
+MIDoutput1 <- ggplot() +
+  geom_point(data = sum,
+             aes(x = age, y = MIDm, color = fhr),
+             alpha = 0.25, size = 1.2) +
+  geom_line(data = newdat,
+            aes(x = age, y = fit, color = fhr),
+            size = 1.2) +
+  scale_color_manual(values = c("Control" = "lightblue", "FHR" = "darkorange")) +
+  scale_y_continuous(limits = c(0,8), breaks = seq(0,8,2)) +
+  labs(
+    title = "Model 1",
+    x = "Age",
+    y = "Midpoint of Sleep in Hours (0 = Midnight)",
+    color = "Group"
+  ) +
+  theme_minimal()
+MIDoutput1
+
+#Graph 2
+age_seq <- seq(
+  min(merged$age, na.rm = TRUE),
+  max(merged$age, na.rm = TRUE),
+  length.out = 200
+)
+
+# 1. Prediction dataframe
+newdat <- expand.grid(
+  age     = age_seq,
+  group   = c("Control", "MDD Risk", "BD Risk"),        # <-- CORRECT
+  sex     = levels(merged$sex)[1],       # hold constant
+  weekend = levels(merged$weekend)[1]    # hold constant
+)
+
+# Ensure factor structure matches the model
+newdat <- newdat %>%
+  mutate(
+    group   = factor(group,   levels = levels(merged$group)),
+    sex     = factor(sex,     levels = levels(merged$sex)),
+    weekend = factor(weekend, levels = levels(merged$weekend)),
+    fid = merged$fid[1],               # valid RE levels
+    subject_id = merged$subject_id[1]
+  )
+
+# 2. Add valid random-effect IDs
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+newdat$fid        <- factor(merged$fid[1], levels = levels(merged$fid))
+
+# 3. Predict SRI, excluding RE if needed
+pred <- predict(
+  mod2,
+  newdata = newdat,
+  re.form = NA,    # fixed effects only
+  se.fit  = FALSE
+)
+
+newdat$fit <- pred
+
+sum <- merged %>%
+  filter(group %in% c("Control", "MDD Risk", "BD Risk")) %>%   # keep only these
+  group_by(filename) %>%
+  summarise(
+    MIDm  = mean(midpoint, na.rm = TRUE),
+    age   = mean(age, na.rm = TRUE),
+    group = first(group)
+  )
+
+
+MIDoutput2 <- ggplot() +
+  geom_point(data = sum,
+             aes(x = age, y = MIDm, color = group),
+             alpha = 0.25, size = 1.2) +
+  geom_line(data = newdat,
+            aes(x = age, y = fit, color = group),
+            size = 1.2) +
+  scale_color_manual(values = c(
+    "Control" = "lightblue",
+    "MDD Risk"     = "darkorange",
+    "BD Risk"      = "darkred"
+  )) +
+  scale_y_continuous(limits = c(0,8), breaks = seq(0,8,2)) +
+  labs(
+    title = "Model 2",
+    x = "Age",
+    y = "Sleep Regularity",
+    color = "Group"
+  ) +
+  theme_minimal()
+MIDoutput2
+
+MIDoutput1 <- MIDoutput1 + theme(legend.position = "top") + theme(legend.title = element_blank()) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+MIDoutput2 <- MIDoutput2 + ylab(NULL) + theme(legend.position = "top") + theme(legend.title = element_blank()) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+MIDcombo <- MIDoutput1 + MIDoutput2 +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    title = "Observed and Modelled Midpoint of Sleep Trajectories by Group",
+    theme = theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      plot.margin = margin(15, 15, 15, 15)
+    )
+  )
+MIDcombo
+
+ggsave(
+  "MID_Patchwork_Linear.png",
+  plot = MIDcombo,
+  width = 8.5, height = 6.5, units = "in", dpi = 600,
+  bg = "white"
+)
+```
 
 ##Nonlinear 
 ###Main
@@ -250,16 +477,12 @@ summary(nonlinear$gam)
 summary(nonlinear_order$gam)
 
 ##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p <- signif(0.0283)
-p <- format(p, scientific = FALSE)
-p
-f <- 3.46
+p_mid <-  1.52e-07 
+pbonf_mid <- 1.52e-07*3
 
-#FDR
-p <- 0.028
-p <- format(p, scientific = FALSE)
 ```
 ###Visualization
+####Graph A
 ```{r}
 age_seq <- seq(min(merged$age), max(merged$age), length.out = 200)
 
@@ -327,48 +550,86 @@ scale_y_continuous(
     title = "Observed and Modelled Sleep Midpoint by Group",
     x = "Age",
     y = "Sleep Midpoint"
-  ) +
+  ) + 
+  annotate(
+  "text",
+  x = min(newdat$age) + 0.5,
+  y = 0.2,
+  label = expression(bold(italic("p"))[BONF.] < 0.001),
+  parse = TRUE,
+  hjust = 0
+) +
   theme_minimal()
 MIDoutput
+```
 
-ggsave(
-  "Midpoint_SleepTrajectories99CI.png",
-  plot = last_plot(),
-  width = 6.9, height = 4.6, units = "in", dpi = 300,
-  bg = "white"
-)
+####Graph B
+```{r}
+#Differences
+bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
 
+MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
+  
+  geom_hline(yintercept = 0, linewidth = 0.8) + 
+  
+  scale_x_continuous(
+  limits = c(8, 25),
+  breaks = seq(10, 25, by = 5)
+) +
 
-diff <- difference_smooths(nonlinear$gam,
-                           select = "s(age)",
-                           by = "fhr",
-                           comp = list(fhr = c("FHR", "Control")))
+  # ---- Insignificant: 8 → 9.95 ----
+  geom_ribbon(
+    data = subset(bands, age >= 8 & age < 9.95),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
 
-MIDdiff <- ggplot(diff, aes(x = age, y = .diff)) +
-  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
-  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci),
-              fill = "#B380B3", alpha = 0.4) +
-  geom_line(color = "#B380B3", linewidth = 1.3) +
-  ggtitle("Difference in Sleep Midpoint (FHR - Control)") +
-  xlab("Age") +
-  ylab("Difference in Predicted Sleep Midpoint") +
-  theme_minimal() +
-  annotate(
-    "text",
-    x = min(diff$age, na.rm = TRUE),
-    y = min(diff$.lower_ci, na.rm = TRUE),
-    label = as.character(
-      as.expression(
-        bquote(bold(italic("p"))[BH] ~ "=" ~ .(formatC(p, format = "e", digits = 2)))
-      )
-    ),
-    parse = TRUE,
-    hjust = 0, vjust = -1, size = 4.2
-  )
+  # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age >= 10 & age <= 14.04),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+
+  # ---- Insignificant: 14.04 → 17.5 ----
+  geom_ribbon(
+    data = subset(bands, age > 14.04 & age < 17.5),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+
+  # ---- Significant: 17.5 → 25 ----
+  geom_ribbon(
+    data = subset(bands, age >= 17.5 & age <= 25),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+
+  geom_line(linewidth = 1.3) +
+
+  labs(
+    title = "Age-varying difference in midpoint",
+    x = "Age (years)",
+    y = "Difference in predicted midpoint"
+  ) +
+
+  theme_minimal()
 
 MIDdiff
 
-library(patchwork)
+
+
+
+```
+
+####Combined Graph
+```{r}
+  library(patchwork)
 
 MIDoutput <- MIDoutput +
   theme(
