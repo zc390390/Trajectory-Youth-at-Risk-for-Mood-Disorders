@@ -490,7 +490,7 @@ ggsave(
 ##Mid Point
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
 
-linear <- lmer(SRI2_scaled ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
+linear <- lmer(SRI2_scaled ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
 
 
 nonlinear <- gamm(
@@ -510,7 +510,7 @@ nonlinear_order <- gamm(
 )
 summary(nonlinear_order$gam)
 
-BIC(linear, nonlinear_order$lme)
+
 
 gam.check(nonlinear_order$gam)
 
@@ -518,8 +518,11 @@ gam.check(nonlinear_order$gam)
 p_sri <- 0.00764
 pbonf_sri <- 0.00764*3 
 
+AIC(linear, nonlinear_order$lme)
+BIC(linear, nonlinear_order$lme)
 
 ```
+
 
 ####Visualization
 #####Graph A
@@ -804,4 +807,31 @@ high_sri <- merged %>%
   )
 
 high_sri
+
+
+
+newdat <- expand.grid(
+  age = 18,
+  fhr2 = levels(merged$fhr2),
+  sex = levels(merged$sex)[1],
+  weekend = levels(merged$weekend)[1]
+)
+
+# Make sure factor levels match
+newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
+newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
+newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
+
+# Predict from GAM (population-level)
+pred_18 <- predict(
+  nonlinear_order$gam,
+  newdata = newdat,
+  type = "response",
+  se.fit = TRUE
+)
+
+# Combine with newdat
+out <- cbind(newdat, fit = pred_18$fit, se = pred_18$se.fit)
+
+out
 ```

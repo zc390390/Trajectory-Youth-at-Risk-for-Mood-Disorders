@@ -456,6 +456,7 @@ ggsave(
 ##Mid Point
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
 
+linear <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
 
 nonlinear <- gamm(
   midpoint ~ fhr + sex + weekend + 
@@ -480,6 +481,8 @@ summary(nonlinear_order$gam)
 p_mid <-  1.52e-07 
 pbonf_mid <- 1.52e-07*3
 
+AIC(linear, nonlinear_order$lme)
+BIC(linear, nonlinear_order$lme)
 ```
 ###Visualization
 ####Graph A
@@ -766,5 +769,33 @@ nonlinear_order <- gamm(
 )
 ```
 
+#Looking at mid
+```{r}
+newdat <- expand.grid(
+  age = 18,
+  fhr2 = levels(merged$fhr2),
+  sex = levels(merged$sex)[1],
+  weekend = levels(merged$weekend)[1]
+)
+
+# Make sure factor levels match
+newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
+newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
+newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
+
+# Predict from GAM (population-level)
+pred_18 <- predict(
+  nonlinear_order$gam,
+  newdata = newdat,
+  type = "response",
+  se.fit = TRUE
+)
+
+# Combine with newdat
+out <- cbind(newdat, fit = pred_18$fit, se = pred_18$se.fit)
+
+out
+
+```
 
 

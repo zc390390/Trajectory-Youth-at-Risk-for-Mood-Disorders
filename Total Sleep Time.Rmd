@@ -433,7 +433,7 @@ ggsave(
 ```{r}
 #This will show difference in smooth factors
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
-
+linear <- lmer(SleepDurationInSpt ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
 
 nonlinear <- gamm(
   SleepDurationInSpt ~ fhr + sex + weekend + 
@@ -451,10 +451,23 @@ nonlinear_order <- gamm(
   method = "REML"
 )
 
+merged$SE <- merged$SleepDurationInSpt/as.numeric(merged$SptDuration)
+
+nonlinear_order2 <- gamm(
+  SE ~ fhr2 + sex + weekend + s(age, k = 5) + 
+    s(age, by = fhr2, k = 5),
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+
 #BIC(linear, nonlinear_order)
 
-summary(nonlinear_order$gam)
+summary(nonlinear_order2$gam)
 
+AIC(linear, nonlinear_order$lme)
+BIC(linear, nonlinear_order$lme)
 p_tst <- 0.0129
 pbonf_tst <- 0.0129*3
 
@@ -775,25 +788,33 @@ ggsave("basis_tst_plot.png", p, width = 12, height = 6, dpi = 300)
 
 #Exploration
 ```{r}
-linear <- lmer(SleepDurationInSpt ~ age*mdd + age*bd + age*psy + sex + weekend + (1|fid/subject_id), data = merged1)
-summary(linear)
+newdat <- expand.grid(
+  age = 18,
+  fhr2 = levels(merged$fhr2),
+  sex = levels(merged$sex)[1],
+  weekend = levels(merged$weekend)[1]
+)
+
+# Make sure factor levels match
+newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
+newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
+newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
+
+# Predict from GAM (population-level)
+pred_18 <- predict(
+  nonlinear_order$gam,
+  newdata = newdat,
+  type = "response",
+  se.fit = TRUE
+)
+
+# Combine with newdat
+out <- cbind(newdat, fit = pred_18$fit, se = pred_18$se.fit)
+
+out
 ```
 
-#Non-Mean Graphing
-##Density plot
-```{r}
-library(ggplot2)
-library(patchwork)
 
 
-# Plot 3: TST mean
-p3 <- ggplot(sum, aes(x = TSTm)) +
-  geom_density(fill = "darkorange", alpha = 0.5, color = "black") +
-  scale_x_continuous(limits = c(4, 12), breaks = seq(4, 12, 2)) +
-  labs(title = "Total Sleep Time Mean", x = "Hours", y = "Density") +
-  theme_minimal()
-
-p3
-```
 
 
