@@ -54,6 +54,8 @@ library(ggplot2)     # General plotting
 
 #Data Setup
 ##Cleaning Actirgaph and Merging
+#New
+
 ```{r}
 setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
 # setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
@@ -128,6 +130,7 @@ merged2 <- merged2 %>% filter(diffdays <= 179)
 merged2$motionlogger <- 1
 
 merged <- rbindlist(list(merged1, merged2), fill = TRUE)
+length(unique(merged$subject_id))
 ```
 
 ##Labeling & Filtering
@@ -437,31 +440,34 @@ linear <- lmer(SleepDurationInSpt ~ fhr2*age + sex + weekend + (1|fid/subject_id
 
 nonlinear <- gamm(
   SleepDurationInSpt ~ fhr + sex + weekend + 
-    s(age, by = fhr, k = 5),
+    s(age, by = fhr, k = 10),
   random = list(fid = ~1, subject_id = ~1),
   data = merged,
   method = "REML"
 )
 
 nonlinear_order <- gamm(
+  SleepDurationInSpt ~ fhr2 + sex + weekend + s(age, k = 10) + 
+    s(age, by = fhr2, k = 10),
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+summary(nonlinear_order$gam)
+
+merged$SE <- merged$SleepDurationInSpt/as.numeric(merged$SptDuration)
+
+nonlinear_order2 <- gamm(
   SleepDurationInSpt ~ fhr2 + sex + weekend + s(age, k = 5) + 
     s(age, by = fhr2, k = 5),
   random = list(fid = ~1, subject_id = ~1),
   data = merged,
   method = "REML"
 )
+gam.check(nonlinear_order$gam)
+gam.check(nonlinear_order2$gam)
 
-merged$SE <- merged$SleepDurationInSpt/as.numeric(merged$SptDuration)
-
-nonlinear_order2 <- gamm(
-  SE ~ fhr2 + sex + weekend + s(age, k = 5) + 
-    s(age, by = fhr2, k = 5),
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-
+AIC(nonlinear_order$lme, nonlinear_order2$lme)
 #BIC(linear, nonlinear_order)
 
 summary(nonlinear_order2$gam)

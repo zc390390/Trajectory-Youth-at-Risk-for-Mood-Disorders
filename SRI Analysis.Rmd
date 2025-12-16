@@ -58,7 +58,10 @@ library(ggplot2)     # General plotting
 setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
 # setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-# setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
+# setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer\
+
+
+
 
 FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
@@ -96,8 +99,10 @@ FOR$Assessment_Date_FOR <- FOR$Assessment_Date
 Night[, Assessment_Date := as.Date(Assessment_Date)]  # redundant if already Date
 Night$Assessment_Date_Night <- Night$Assessment_Date
 merged1 <- Night[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-merged1[, diffdays := abs(as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
-merged1 <- merged1 %>% filter(diffdays <= 179)
+merged1[, diffdays := (as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
+
+merged1 <- merged1 %>% filter(diffdays > 0 & diffdays <= 300)
+
 two <- merged1[(Subject_ID %in% c(8000038204, 8000114479))]
 
 ##Motion Logger Merging
