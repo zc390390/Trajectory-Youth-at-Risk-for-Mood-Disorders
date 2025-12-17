@@ -554,7 +554,7 @@ scale_y_continuous(
   "text",
   x = min(newdat$age) + 0.5,
   y = 0.2,
-  label = expression(bold(italic("p"))[BONF.] > 0.01),
+  label = expression(bold(italic("p"))[BONF.] < 0.01),
   parse = TRUE,
   hjust = 0
 ) +
