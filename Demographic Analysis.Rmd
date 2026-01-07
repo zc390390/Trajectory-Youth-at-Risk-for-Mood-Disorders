@@ -54,8 +54,8 @@ output: html_document
 
 #Load Data
 ```{r}
-setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+#setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
+  setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
 # setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
 
@@ -67,68 +67,78 @@ NightM <- read_excel("motionloggerdata.xlsx")
 
 #Merge Datasets
 ```{r}
+
+Night$calendar_date <- as.Date(Night$calendar_date)
+Night <- Night %>%
+  mutate(
+    calendar_date = case_when(
+      filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" ~ calendar_date + 120,
+      TRUE ~ calendar_date
+    )
+  )
+Night$filename <- gsub("^800-304", "800-0304", Night$filename)
+Night$filename <- gsub("^800-0066-106", "800-0065-106", Night$filename) # double check
+Night$filename <- gsub("^800-0298-507", "800-0298-570", Night$filename)
+Night$filename <- gsub("^800-0221-441", "800-0221-411", Night$filename)
+Night$filename <- gsub("^0037062", "800-0037-062", Night$filename)
+
 Night$Subject_ID <- substr(Night$filename, 1, 12)
-Night$Assessment_Date <- str_extract(Night$calendar_date, "\\d{4}-\\d{2}-\\d{2}")
-Night <- Night %>% filter(!str_detect(filename, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
+Night <- Night %>%
+  dplyr::rename(Assessment_Date = calendar_date)
+Night <- Night %>% 
+  filter(!str_detect(filename, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
 
-bin_files_to_remove <- c("8000103174_left wrist_068158_2025-06-03 10-40-36.bin", "8000156273_left wrist_060381_2024-11-05 12-04-08_partial.bin", "8000156273_left wrist_060381_2024-11-05 12-27-40.bin", "800304581_right wrist_060843_2024-11-05 13-16-09.bin", "800304582__060365_2024-11-05 12-03-44.bin",  "800304582__060365_2024-11-05 12-28-01.bin")
+##Filtering bad extraction. Filtering a weird GGIR duplication?     
+bin_files_to_remove <- c(
+  "8000156273_left wrist_060381_2024-11-05 12-04-08_partial.bin"
+)
+Night <- Night %>%
+  filter(!filename %in% bin_files_to_remove)
+Night <- Night %>%
+  filter(
+    !(filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" &
+    sleepparam == "spt_crude_estimate")
+  )
 
-Night <- Night %>% filter(!filename %in% bin_files_to_remove)
-Night <- Night %>% mutate(Subject_ID = gsub("^800-(\\d{3})-(\\d+)_$", "800-0\\1-\\2", Subject_ID))
 
+Night <- Night %>%
+  mutate(Subject_ID = gsub("^800-(\\d{3})-(\\d+)_$", "800-0\\1-\\2", Subject_ID))
 Night$Subject_ID <- gsub("-", "", Night$Subject_ID)
 Night$Subject_ID <- gsub("[a-zA-Z]", "", Night$Subject_ID)
 Night$Subject_ID <- gsub("_", "", Night$Subject_ID)
 FOR$Subject_ID <- gsub("-", "", as.character(FOR$subject_id))
-Night$SleepDurationInSpt <- as.numeric(Night$SleepDurationInSpt)
-Night <- Night %>%
-  group_by(filename) %>%
-  summarise(
-    Subject_ID = first(Subject_ID),
-    Assessment_Date = first(Assessment_Date),
-    TSTm = mean(SleepDurationInSpt, na.rm = TRUE),
-    )
-unique(Night$Subject_ID)
-
 setDT(Night)
 setDT(FOR)
+
+##GeneACTIV Merging
 Night$geneactiv <- 1
 FOR[, Assessment_Date := as.Date(assessment_date)]
 FOR$Assessment_Date_FOR <- FOR$Assessment_Date
-Night[, Assessment_Date := as.Date(Assessment_Date)]  
+Night[, Assessment_Date := as.Date(Assessment_Date)]  # redundant if already Date
 Night$Assessment_Date_Night <- Night$Assessment_Date
-
-# Perform the join with date window logic
 merged1 <- Night[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
 merged1[, diffdays := (as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
-merged1 <- merged1 %>% filter(diffdays >= 0 & diffdays <= 100)
-unique(merged1$subject_id)
 
+merged1 <- merged1 %>% filter(diffdays >= 0 & diffdays <= 100)
+
+two <- merged1[(Subject_ID %in% c(8000038204, 8000114479))]
+
+##Motion Logger Merging
 NightM <- NightM %>%
   mutate(filename = paste0(ID, "motionlogg"))
 NightM$weekday <- NightM$eday
 NightM <- NightM %>% 
   filter(!str_detect(Subject_ID, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
-
 setDT(NightM)
 NightM[, Assessment_Date := as.Date(sdate)]
-NightM <- NightM %>%
-  group_by(filename) %>%
-  summarise(
-    Subject_ID = first(Subject_ID),
-    Assessment_Date = first(Assessment_Date),
-    TSTm = mean(SleepDurationInSpt, na.rm = TRUE))
-unique(NightM$Subject_ID)
 NightM$Assessment_date_nightM <- NightM$Assessment_Date
-
-setDT(FOR)
-setDT(NightM)
+NightM$Assessment_Date_Night <- NightM$Assessment_Date
 merged2 <- NightM[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-merged2[, diffdays := (as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
+merged2[, diffdays := abs(as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
 merged2 <- merged2 %>% filter(diffdays >= 0 & diffdays <= 100)
 merged2$motionlogger <- 1
-unique(merged2$Subject_ID)
 
+#Combination of Motion and GeneActiv
 merged <- rbindlist(list(merged1, merged2), fill = TRUE)
 ```
 
@@ -147,7 +157,7 @@ unmerged <- unmerged %>%
   filter(!is.na(redcap_repeat_instance))
 unmerged <- unmerged %>%
   group_by(Subject_ID) %>%
-  slice_tail(n = 1) %>%
+  slice(n()) %>%   # second-to-last row per Subject_ID
   ungroup()
 unmerged <- unmerged %>%
   filter(group != 3)
@@ -165,26 +175,60 @@ table(merged$group)
 table(merged$sex)
 
   
-#360
+#338
 
 #Filter Age
+unmerged$age <- as.numeric(unmerged$age)
 unmerged <- unmerged %>%
-  filter(age < 8)
+  filter(age > 8)
 
-#351
+#269
 
 #Filter assessment dates
 unmerged <- unmerged %>%
   filter(Assessment_Date < as.Date("2021-07-01"))
 
 
-#121
+#94
 
-#Filter high risk schizo
+#Compare now
+#sex
+u_sex <- unmerged %>%
+  transmute(sex, dataset = "unmerged")
+
+m_sex <- merged %>%
+  transmute(sex, dataset = "merged")
+
+sex_compare <- bind_rows(u_sex, m_sex)
+
+sex_tab <- table(sex_compare$dataset, sex_compare$sex)
+
+sex_tab
+chisq.test(sex_tab)
+
+#family risk
+u_grp <- unmerged %>%
+  transmute(group, dataset = "unmerged")
+
+m_grp <- merged %>%
+  transmute(group, dataset = "merged")
+
+grp_compare <- bind_rows(u_grp, m_grp)
+
+grp_tab <- table(grp_compare$dataset, grp_compare$group)
+
+grp_tab
+chisq.test(grp_tab)
 
 
+#age
+age1 <- unmerged$age
+age2 <- as.numeric(merged$age)
 
+t.test(age1, age2)
 
+mean(age1)
+mean(age2)
 ```
 
 
@@ -193,28 +237,87 @@ unmerged <- unmerged %>%
 merged$age <- as.numeric(merged$age)
 merged$time_point <- as.numeric(merged$time_point)
 
-merged_s <- merged 
 
-merged_s <- merged_s %>%
-  group_by(group, Subject_ID) %>% 
+race_lookup <- FOR %>%
+  filter(!is.na(race)) %>%
+  group_by(Subject_ID) %>%
   summarise(
-    age = mean(age, na.rm = TRUE),
-    time_point = mean(time_point, na.rm = TRUE),
-    NxtDepression = max(NxtDepression, na.rm = TRUE),
-    .groups = "drop"
-  ) %>% 
-  group_by(group) %>%
-  summarise(
-    n          = n(),  # number of unique IDs in each group
-    age_mean   = mean(age, na.rm = TRUE),
-    age_sd     = sd(age, na.rm = TRUE),
-    Follow_mean = mean(time_point, na.rm = TRUE),
-    Follow_sd   = sd(time_point, na.rm = TRUE),
-    sum_NxtMDD = sum(NxtDepression, na.rm = TRUE),
+    race = first(race),   # or use most frequent if messy
     .groups = "drop"
   )
 
-pander(merged_s)
+
+merged_s <- merged 
+merged_s <- merged_s %>%
+  left_join(race_lookup, by = "Subject_ID")
+library(dplyr)
+library(tibble)
+
+# 1) One row per Subject_ID (edit race column name if needed)
+demo <- merged_s %>%
+  group_by(Subject_ID) %>%
+  summarise(
+    group = first(group),
+    age   = mean(age, na.rm = TRUE),
+    sex   = first(sex),
+    race  = first(race.y),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    group = factor(group,
+                   levels = c(0, 1, 2),
+                   labels = c("Control", "MDD Risk", "BD Risk"))
+  )
+
+demo_check <- demo %>%
+  group_by(group) %>%
+  summarise(
+    n = n(),
+    age_mean = mean(age, na.rm = TRUE),
+    age_sd   = sd(age, na.rm = TRUE),
+
+    female_n = sum(sex == 1, na.rm = TRUE),
+
+    White_n  = sum(race == 1, na.rm = TRUE),
+    Black_n  = sum(race == 2, na.rm = TRUE),
+    Asian_n  = sum(race == 3, na.rm = TRUE),
+    FirstNation_n = sum(race == 4, na.rm = TRUE),
+    Other_n = sum(race %in% c(5,6, 9) | is.na(race), na.rm = TRUE),
+
+    .groups = "drop"
+  )
+
+
+table_demo <- demo_check %>%
+  pivot_longer(
+    cols = -group,
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  pivot_wider(
+    names_from = group,
+    values_from = Value
+  )
+
+
+pander(table_demo)
+
+#Compare differences
+#age
+anova_age <- aov(age ~ group, data = demo)
+summary(anova_age)
+
+#sex
+sex_tab <- table(demo$group, demo$sex)
+sex_chi <- chisq.test(sex_tab)
+
+sex_chi
+
+#race
+chisq.test(table(demo$group, demo$race))
+
+
+
 ```
 
 

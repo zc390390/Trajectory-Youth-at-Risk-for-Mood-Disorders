@@ -56,9 +56,9 @@ output: html_document
 #Load Data
 ```{r}
 # setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
+#setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
 
 FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character())) 
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character())) 
@@ -68,22 +68,53 @@ NightM <- read_excel("motionloggerdata.xlsx")
 
 #Non-Mean Exploration
 ```{r}
+# setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
+  setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
+# setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
+# setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer\
+
+
+
+
+FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
+Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
+NightM <- read_excel("motionloggerdata.xlsx")
+
+#Fix clerical errors
+
+Night$calendar_date <- as.Date(Night$calendar_date)
+Night <- Night %>%
+  mutate(
+    calendar_date = case_when(
+      filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" ~ calendar_date + 120,
+      TRUE ~ calendar_date
+    )
+  )
+Night$filename <- gsub("^800-304", "800-0304", Night$filename)
+Night$filename <- gsub("^800-0066-106", "800-0065-106", Night$filename) # double check
+Night$filename <- gsub("^800-0298-507", "800-0298-570", Night$filename)
+Night$filename <- gsub("^800-0221-441", "800-0221-411", Night$filename)
+Night$filename <- gsub("^0037062", "800-0037-062", Night$filename)
+
 Night$Subject_ID <- substr(Night$filename, 1, 12)
-Night$Assessment_Date <- str_extract(Night$filename, "\\d{4}-\\d{2}-\\d{2}")
+Night <- Night %>%
+  dplyr::rename(Assessment_Date = calendar_date)
 Night <- Night %>% 
   filter(!str_detect(filename, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
 
-##Why are we removing this         
+##Filtering bad extraction. Filtering a weird GGIR duplication?     
 bin_files_to_remove <- c(
-  "8000103174_left wrist_068158_2025-06-03 10-40-36.bin",
-  "8000156273_left wrist_060381_2024-11-05 12-04-08_partial.bin",
-  "8000156273_left wrist_060381_2024-11-05 12-27-40.bin",
-  "800304581_right wrist_060843_2024-11-05 13-16-09.bin",
-  "800304582__060365_2024-11-05 12-03-44.bin",
-  "800304582__060365_2024-11-05 12-28-01.bin"
+  "8000156273_left wrist_060381_2024-11-05 12-04-08_partial.bin"
 )
 Night <- Night %>%
   filter(!filename %in% bin_files_to_remove)
+Night <- Night %>%
+  filter(
+    !(filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" &
+    sleepparam == "spt_crude_estimate")
+  )
+
+
 Night <- Night %>%
   mutate(Subject_ID = gsub("^800-(\\d{3})-(\\d+)_$", "800-0\\1-\\2", Subject_ID))
 Night$Subject_ID <- gsub("-", "", Night$Subject_ID)
@@ -100,8 +131,10 @@ FOR$Assessment_Date_FOR <- FOR$Assessment_Date
 Night[, Assessment_Date := as.Date(Assessment_Date)]  # redundant if already Date
 Night$Assessment_Date_Night <- Night$Assessment_Date
 merged1 <- Night[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-merged1[, diffdays := abs(as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
-merged1 <- merged1 %>% filter(diffdays <= 179)
+merged1[, diffdays := (as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
+
+merged1 <- merged1 %>% filter(diffdays >= 0 & diffdays <= 100)
+
 two <- merged1[(Subject_ID %in% c(8000038204, 8000114479))]
 
 ##Motion Logger Merging
@@ -115,7 +148,7 @@ NightM[, Assessment_Date := as.Date(sdate)]
 NightM$Assessment_date_nightM <- NightM$Assessment_Date
 merged2 <- NightM[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
 merged2[, diffdays := abs(as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
-merged2 <- merged2 %>% filter(diffdays <= 179)
+merged2 <- merged2 %>% filter(diffdays >= 0 & diffdays <= 100)
 merged2$motionlogger <- 1
 
 #Combination of Motion and GeneActiv
@@ -166,7 +199,7 @@ merged$fid <- factor(merged$fid)
 
 
 #Remove Psy Risk and Those without gruop
-merged <- merged %>% filter(age <= 22 & age >= 8)
+merged <- merged %>% filter(age < 25 & age >= 8)
 merged <- merged %>% filter(group != 'Psy Risk')
 
 table(merged$group)
@@ -453,7 +486,7 @@ ggsave(
 ##Mid Point
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
 
-linear <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
+linear <- lmer(midpoint ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
 
 nonlinear <- gamm(
   midpoint ~ fhr + sex + weekend + 
@@ -474,8 +507,8 @@ nonlinear_order <- gamm(
 summary(nonlinear_order$gam)
 
 ##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p_mid <-  0.00147
-pbonf_mid <- 0.00147*3
+p_mid <-  3.59e-05
+pbonf_mid <- 3.59e-05*3
 
 AIC(linear, nonlinear_order$lme)
 BIC(linear, nonlinear_order$lme)
@@ -565,8 +598,8 @@ MIDoutput
 ####Graph B
 ```{r}
 #Differences
-bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
-(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
+bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
 
 MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   
@@ -579,7 +612,23 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
 
   # ---- Insignificant: 8 → 9.95 ----
   geom_ribbon(
-    data = subset(bands, age >= 8 & age < 16),
+    data = subset(bands, age >= 8 & age < 10.1),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+  
+    # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age >= 10.1 & age <= 13.34),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+  
+    # ---- Insignificant: 14.04 → 17.5 ----
+  geom_ribbon(
+    data = subset(bands, age > 13.34 & age <= 17.5),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
@@ -587,18 +636,10 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
 
   # ---- Significant: 10 → 14.04 ----
   geom_ribbon(
-    data = subset(bands, age >= 16 & age <= 18.6),
+    data = subset(bands, age > 17.5 & age <= 25),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#8E4A8E",
     alpha = 0.5
-  ) +
-
-  # ---- Insignificant: 14.04 → 17.5 ----
-  geom_ribbon(
-    data = subset(bands, age > 18.6 & age <= 22),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#B380B3",
-    alpha = 0.25
   ) +
 
   geom_line(linewidth = 1.3) +

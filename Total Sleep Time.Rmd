@@ -56,77 +56,89 @@ library(ggplot2)     # General plotting
 ##Cleaning Actirgaph and Merging
 ```{r}
 # setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-# setwd("C:/Users/zachh/Documents/Code/git/Data")  # Laptop
+  setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
+# setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer\
+
+
+
 
 FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
 NightM <- read_excel("motionloggerdata.xlsx")
 
+#Fix clerical errors
+
+Night$calendar_date <- as.Date(Night$calendar_date)
+Night <- Night %>%
+  mutate(
+    calendar_date = case_when(
+      filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" ~ calendar_date + 120,
+      TRUE ~ calendar_date
+    )
+  )
+Night$filename <- gsub("^800-304", "800-0304", Night$filename)
+Night$filename <- gsub("^800-0066-106", "800-0065-106", Night$filename) # double check
+Night$filename <- gsub("^800-0298-507", "800-0298-570", Night$filename)
+Night$filename <- gsub("^800-0221-441", "800-0221-411", Night$filename)
+Night$filename <- gsub("^0037062", "800-0037-062", Night$filename)
+
 Night$Subject_ID <- substr(Night$filename, 1, 12)
-Night$Assessment_Date <- str_extract(Night$filename, "\\d{4}-\\d{2}-\\d{2}")
+Night <- Night %>%
+  dplyr::rename(Assessment_Date = calendar_date)
 Night <- Night %>% 
   filter(!str_detect(filename, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
 
-##Why are we removing this         
+##Filtering bad extraction. Filtering a weird GGIR duplication?     
 bin_files_to_remove <- c(
-  "8000103174_left wrist_068158_2025-06-03 10-40-36.bin",
-  "8000156273_left wrist_060381_2024-11-05 12-04-08_partial.bin",
-  "8000156273_left wrist_060381_2024-11-05 12-27-40.bin",
-  "800304581_right wrist_060843_2024-11-05 13-16-09.bin",
-  "800304582__060365_2024-11-05 12-03-44.bin",
-  "800304582__060365_2024-11-05 12-28-01.bin"
+  "8000156273_left wrist_060381_2024-11-05 12-04-08_partial.bin"
 )
-
 Night <- Night %>%
   filter(!filename %in% bin_files_to_remove)
+Night <- Night %>%
+  filter(
+    !(filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" &
+    sleepparam == "spt_crude_estimate")
+  )
+
 
 Night <- Night %>%
   mutate(Subject_ID = gsub("^800-(\\d{3})-(\\d+)_$", "800-0\\1-\\2", Subject_ID))
-
 Night$Subject_ID <- gsub("-", "", Night$Subject_ID)
 Night$Subject_ID <- gsub("[a-zA-Z]", "", Night$Subject_ID)
 Night$Subject_ID <- gsub("_", "", Night$Subject_ID)
 FOR$Subject_ID <- gsub("-", "", as.character(FOR$subject_id))
-
 setDT(Night)
 setDT(FOR)
 
+##GeneACTIV Merging
 Night$geneactiv <- 1
 FOR[, Assessment_Date := as.Date(assessment_date)]
 FOR$Assessment_Date_FOR <- FOR$Assessment_Date
 Night[, Assessment_Date := as.Date(Assessment_Date)]  # redundant if already Date
 Night$Assessment_Date_Night <- Night$Assessment_Date
-
-# Perform the join with date window logic
 merged1 <- Night[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-
 merged1[, diffdays := (as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
 
-merged1 <- merged1 %>% filter(diffdays > 0 & diffdays <= 300)
+merged1 <- merged1 %>% filter(diffdays >= 0 & diffdays <= 100)
 
 two <- merged1[(Subject_ID %in% c(8000038204, 8000114479))]
 
-
+##Motion Logger Merging
 NightM <- NightM %>%
   mutate(filename = paste0(ID, "motionlogg"))
-
 NightM$weekday <- NightM$eday
 NightM <- NightM %>% 
   filter(!str_detect(Subject_ID, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
 setDT(NightM)
 NightM[, Assessment_Date := as.Date(sdate)]
 NightM$Assessment_date_nightM <- NightM$Assessment_Date
-
-
 merged2 <- NightM[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-
-
-merged2[, diffdays := (as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
-merged2 <- merged2 %>% filter(diffdays > 0 & diffdays <= 300)
+merged2[, diffdays := abs(as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
+merged2 <- merged2 %>% filter(diffdays >= 0 & diffdays <= 100)
 merged2$motionlogger <- 1
 
+#Combination of Motion and GeneActiv
 merged <- rbindlist(list(merged1, merged2), fill = TRUE)
 length(unique(merged$subject_id))
 ```
@@ -159,7 +171,7 @@ merged$subject_id <- as.factor(merged$subject_id)
 merged$SleepDurationInSpt <- as.numeric(merged$SleepDurationInSpt)
 
 #Remove Psy Risk and Those without gruop
-merged <- merged %>% filter(age <= 22 & age >= 8)
+merged <- merged %>% filter(age < 25 & age >= 8)
 merged <- merged %>% filter(group != 'Psy Risk')
 
 table(merged$group)
@@ -471,11 +483,12 @@ gam.check(nonlinear_order$gam)
 
 AIC(linear, nonlinear_order$lme)
 BIC(linear, nonlinear_order$lme)
-p_tst <- 0.0128
-pbonf_tst <- 0.0128*3
+p_tst <- 0.0112
+pbonf_tst <- 0.0112*3
 
 
-
+gam.check(nonlinear_order$gam)
+draw(nonlinear_order)
 ```
 
 ###Visualization
@@ -557,7 +570,7 @@ TSToutput <- ggplot() +
   "text",
   x = min(newdat$age) + 0.5,
   y = 4.2,
-  label = expression(bold(italic("p"))[BONF.] == 0.03),
+  label = expression(bold(italic("p"))[BONF.] == 0.033),
   parse = TRUE,
   hjust = 0
 ) +
@@ -569,10 +582,10 @@ TSToutput
 ####Graph B
 ```{r}
 #Differences
-bands <- (confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 20000, level = 0.983, type = "simultaneous"))
+bands <- (confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 20000, level = 0.95, type = "simultaneous"))
 draw(bands)
 
-(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.983, type = "simultaneous"))
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
 
 
 TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
@@ -580,12 +593,29 @@ TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   geom_hline(yintercept = 0, linewidth = 0.8) + 
   
   scale_x_continuous(
-  limits = c(8, 22),
-  breaks = seq(8, 22, by = 5)
+  limits = c(8, 25),
+  breaks = seq(8, 25, by = 5)
 ) +
   # ---- Insignificant: 8 → 18.32 ----
   geom_ribbon(
-    data = subset(bands, age >= 8 & age <= 22),
+    data = subset(bands, age >= 8 & age < 20.6),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+  
+      # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age >= 20.6 & age <= 20.79),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+  
+  
+    # ---- Insignificant: 8 → 18.32 ----
+  geom_ribbon(
+    data = subset(bands, age > 20.79 & age <= 25),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
