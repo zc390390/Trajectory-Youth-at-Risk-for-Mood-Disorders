@@ -694,6 +694,28 @@ ggsave(
 
 ```
 
+####Age get
+```{r}
+newdat <- expand.grid(
+  age = 18,
+  fhr = factor(c("Control", "FHR"), levels = levels(merged$fhr)),
+  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),
+  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))
+)
+
+# Assign one subject ID (for random effects if included)
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+
+pred_fit <- predict(
+  nonlinear$gam,
+  newdata = newdat,
+  type = "response",
+  exclude = "s(subject_id)"
+)
+
+cbind(newdat, pred = pred_fit)
+```
+
 ###Table
 ```{R}
 library(dplyr)
