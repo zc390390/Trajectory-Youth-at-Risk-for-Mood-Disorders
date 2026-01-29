@@ -52,21 +52,21 @@ output: html_document
   library(ggplot2)     # General plotting
 ```
 
-#Load Data
-```{r}
-#setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-  setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
-# setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-# setwd("C:/Users/zacha/Documents/forbow/code/git") # Home Computer
-
-FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character())) 
-
-Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character())) 
-NightM <- read_excel("motionloggerdata.xlsx")
-```
-
 #Merge Datasets
 ```{r}
+# setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
+  setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
+# setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
+# setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer\
+
+
+
+
+FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
+Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
+NightM <- read_excel("motionloggerdata.xlsx")
+
+#Fix clerical errors
 
 Night$calendar_date <- as.Date(Night$calendar_date)
 Night <- Night %>%
@@ -140,6 +140,23 @@ merged2$motionlogger <- 1
 
 #Combination of Motion and GeneActiv
 merged <- rbindlist(list(merged1, merged2), fill = TRUE)
+
+merged$weekend <- ifelse(merged$weekday %in% c("Fri", "Friday", "Sat", "Saturday"), 1, 0)
+merged$weekend <- factor(merged$weekend,
+                         levels = c(0, 1),
+                         labels = c("Weekday", "Weekend"))
+merged <- merged %>%
+  group_by(filename) %>%   # or filename
+  filter(
+    sum(weekend == "Weekend", na.rm = TRUE) >= 1,
+    sum(weekend == "Weekday", na.rm = TRUE) >= 3
+  ) %>%
+  ungroup()
+merged$group1 <- merged$group
+merged$group <- factor(merged$group,
+                       levels = c(0, 1, 2, 3),
+                       labels = c("Control", "MDD Risk", "BD Risk", "Psy Risk"))
+
 ```
 
 #Non Participators 
@@ -149,6 +166,12 @@ FOR <- FOR %>% filter(!str_detect(subject_id, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"
 FOR <- FOR %>%filter(!str_detect(subject_id, "8009999123"))
 length(unique(FOR$subject_id))
 
+#Participators
+merged <- merged %>%
+  filter(group != "Psy Risk")
+merged$age <- as.numeric(merged$age)
+merged <- merged %>% filter(age < 25 & age >= 8)
+
 #List of Non Sleep Participators Ever
 list <- unique(merged$Subject_ID)
 unmerged <- FOR[!Subject_ID %in% list]
@@ -156,16 +179,21 @@ unique(unmerged$Subject_ID)
 unmerged <- unmerged %>%
   filter(!is.na(redcap_repeat_instance))
 unmerged <- unmerged %>%
+  filter(group != 3)
+unmerged$age <- as.numeric(unmerged$age)
+unmerged$group <- factor(unmerged$group,
+                       levels = c(0, 1, 2, 3),
+                       labels = c("Control", "MDD Risk", "BD Risk", "Psy Risk"))
+unmerged <- unmerged %>% filter(age < 25 & age >= 8)
+unmerged <- unmerged %>%
   group_by(Subject_ID) %>%
   slice(n()) %>%   # second-to-last row per Subject_ID
   ungroup()
-unmerged <- unmerged %>%
-  filter(group != 3)
 
 table(unmerged$group)
 
-#Participators
-merged <- merged[group != 3]
+
+
 
 merged <- merged %>%
     group_by(Subject_ID) %>%
@@ -174,22 +202,21 @@ merged <- merged %>%
 table(merged$group)
 table(merged$sex)
 
-  
-#338
+#Amount of participants who made it into merged study
+##268
+table(merged$group)
+table(merged$sex)
 
-#Filter Age
-unmerged$age <- as.numeric(unmerged$age)
-unmerged <- unmerged %>%
-  filter(age > 8)
+#Nonparticipants not participant
 
-#269
+#280
 
 #Filter assessment dates
 unmerged <- unmerged %>%
   filter(Assessment_Date < as.Date("2021-07-01"))
+table(unmerged$age)
 
-
-#94
+#103
 
 #Compare now
 #sex
@@ -199,10 +226,10 @@ u_sex <- unmerged %>%
 m_sex <- merged %>%
   transmute(sex, dataset = "merged")
 
-sex_compare <- bind_rows(u_sex, m_sex)
+sex_compare <- bind_rows(u_sex, m_sex) %>%
+  mutate(dataset = factor(dataset, levels = c("unmerged", "merged")))
 
 sex_tab <- table(sex_compare$dataset, sex_compare$sex)
-
 sex_tab
 chisq.test(sex_tab)
 
@@ -216,9 +243,9 @@ m_grp <- merged %>%
 grp_compare <- bind_rows(u_grp, m_grp)
 
 grp_tab <- table(grp_compare$dataset, grp_compare$group)
-
-grp_tab
-chisq.test(grp_tab)
+grp_tab2 <- grp_tab[, c("Control", "MDD Risk", "BD Risk")]
+grp_tab2
+chisq.test(grp_tab2)
 
 
 #age
@@ -257,7 +284,7 @@ library(tibble)
 demo <- merged_s %>%
   group_by(Subject_ID) %>%
   summarise(
-    group = first(group),
+    group = first(group1),
     age   = mean(age, na.rm = TRUE),
     sex   = first(sex),
     race  = first(race.y),
@@ -317,6 +344,85 @@ sex_chi
 chisq.test(table(demo$group, demo$race))
 
 
+
+```
+
+#Apa talbe
+```{r}
+sex_test <- chisq.test(sex_tab)
+
+sex_row <- tibble(
+  Variable  = "Sex",
+  Merged    = paste(sex_tab["merged", ], collapse = " / "),
+  Unmerged  = paste(sex_tab["unmerged", ], collapse = " / "),
+  Test      = "Chi-square",
+  Statistic = sprintf("χ²(%d) = %.2f", sex_test$parameter, sex_test$statistic),
+  p_value   = sex_test$p.value
+)
+
+grp_test <- chisq.test(grp_tab2)
+
+grp_row <- tibble(
+  Variable  = "Familial risk group",
+  Merged    = paste(grp_tab2["merged", ], collapse = " / "),
+  Unmerged  = paste(grp_tab2["unmerged", ], collapse = " / "),
+  Test      = "Chi-square",
+  Statistic = sprintf("χ²(%d) = %.2f", grp_test$parameter, grp_test$statistic),
+  p_value   = grp_test$p.value
+)
+
+
+age_test <- t.test(age1, age2)
+
+age_row <- tibble(
+  Variable  = "Age (years)",
+  Merged    = sprintf("%.2f (%.2f)", mean(age2, na.rm = TRUE), sd(age2, na.rm = TRUE)),
+  Unmerged  = sprintf("%.2f (%.2f)", mean(age1, na.rm = TRUE), sd(age1, na.rm = TRUE)),
+  Test      = "t-test",
+  Statistic = sprintf("t(%.1f) = %.2f", age_test$parameter, age_test$statistic),
+  p_value   = age_test$p.value
+)
+
+
+supp_table <- bind_rows(sex_row, grp_row, age_row) %>%
+  mutate(
+    p_value = ifelse(p_value < .001, "< .001", sprintf("%.3f", p_value))
+  )
+
+supp_table
+library(flextable)
+
+apa_table <- flextable(supp_table) %>%
+  set_header_labels(
+    Variable  = "Variable",
+    Merged    = "Merged sample",
+    Unmerged  = "Unmerged sample",
+    Test      = "Test",
+    Statistic = "Statistic",
+    p_value   = "p"
+  ) %>%
+  autofit() %>%
+  theme_booktabs() %>%        # APA-style horizontal rules
+  align(j = 2:6, align = "center", part = "all") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  bold(j = 1, part = "body") %>%
+  bold(part = "header") %>%
+  set_caption(
+    as_paragraph(
+      as_chunk("Table S1\n", props = fp_text(font.size = 12, bold = TRUE)),
+      as_chunk(
+        "",
+        props = fp_text(font.size = 12, italic = TRUE)
+      )
+    )
+  )
+
+apa_table
+
+save_as_docx(
+  apa_table,
+  path = "Supplementary_Table_S1.docx"
+)
 
 ```
 

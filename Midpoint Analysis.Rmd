@@ -153,6 +153,8 @@ merged2$motionlogger <- 1
 
 #Combination of Motion and GeneActiv
 merged <- rbindlist(list(merged1, merged2), fill = TRUE)
+
+merged <- merged[Assessment_Date_Night >= as.Date("2017-01-01")]
 ```
 
 
@@ -177,7 +179,7 @@ merged <- merged %>%
   mutate(fhr = ifelse(group %in% c(1, 2, 3), 1, 0))
 
 merged$weekend <- ifelse(merged$weekday %in% 
-                         c("Sat", "Saturday", "Sun", "Sunday"), 1, 0)
+                         c("Fri", "Friday", "Sat", "Saturday"), 1, 0)
 
 #Labeling
 merged$fhr <- factor(merged$fhr,
@@ -507,10 +509,8 @@ nonlinear_order <- gamm(
 summary(nonlinear_order$gam)
 
 ##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p_mid <-  3.59e-05
-pbonf_mid <- 3.59e-05*3
+p_mid <-  0.00361
 
-AIC(linear, nonlinear_order$lme)
 BIC(linear, nonlinear_order$lme)
 ```
 ###Visualization
@@ -609,18 +609,10 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   limits = c(8, 25),
   breaks = seq(10, 25, by = 5)
 ) +
-
-  # ---- Insignificant: 8 → 9.95 ----
-  geom_ribbon(
-    data = subset(bands, age >= 8 & age < 10.1),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#B380B3",
-    alpha = 0.25
-  ) +
   
     # ---- Significant: 10 → 14.04 ----
   geom_ribbon(
-    data = subset(bands, age >= 10.1 & age <= 13.34),
+    data = subset(bands, age >= 8 & age <= 12.1),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#8E4A8E",
     alpha = 0.5
@@ -628,7 +620,7 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   
     # ---- Insignificant: 14.04 → 17.5 ----
   geom_ribbon(
-    data = subset(bands, age > 13.34 & age <= 17.5),
+    data = subset(bands, age > 12.1 & age <= 17.1),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
@@ -636,7 +628,7 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
 
   # ---- Significant: 10 → 14.04 ----
   geom_ribbon(
-    data = subset(bands, age > 17.5 & age <= 25),
+    data = subset(bands, age > 17.1 & age <= 25),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#8E4A8E",
     alpha = 0.5
@@ -664,20 +656,26 @@ MIDdiff
   library(patchwork)
 
 MIDoutput <- MIDoutput +
+  labs(tag = "(A)") +
   theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
     plot.margin = margin(10, 10, 10, 10)
   )
 
 MIDdiff <- MIDdiff +
+  labs(tag = "(B)") +
   theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
     plot.margin = margin(10, 10, 10, 10)
   )
 MIDcombo <- MIDoutput + MIDdiff +
   plot_layout(ncol = 2, widths = c(1, 1)) +
   plot_annotation(
-    title = "Sleep Midpoint Trajectories and Group Differences",
+    title = "",
     theme = theme(
       plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
       plot.margin = margin(15, 15, 15, 15)

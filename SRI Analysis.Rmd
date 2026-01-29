@@ -142,6 +142,8 @@ merged2$motionlogger <- 1
 #Combination of Motion and GeneActiv
 merged <- rbindlist(list(merged1, merged2), fill = TRUE)
 
+merged <- merged[Assessment_Date_Night >= as.Date("2017-01-01")]
+
 #Setup
 merged$sleeponset <- as.numeric(merged$sleeponset)
 merged$wakeup <- as.numeric(merged$wakeup)
@@ -221,8 +223,7 @@ merged <- merged %>%
   mutate(fhr = ifelse(group %in% c(1, 2, 3), 1, 0))
 
 merged$weekend <- ifelse(merged$weekday %in% 
-                         c("Sat", "Saturday", "Sun", "Sunday"), 1, 0)
-
+                         c("Fri", "Friday", "Sat", "Saturday"), 1, 0)
 #Labeling
 merged$fhr <- factor(merged$fhr,
                        levels = c(0, 1),
@@ -254,7 +255,7 @@ merged <- merged %>%
   )
 
 merged <- merged %>%
-  group_by(filename) %>%   # or filename
+  group_by(filename) %>%  
   filter(
     sum(weekend == "Weekend", na.rm = TRUE) >= 1,
     sum(weekend == "Weekday", na.rm = TRUE) >= 3
@@ -535,6 +536,7 @@ ggsave(
 ```{r}
 ##Mid Point
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
+merged$sex2 <- ordered(merged$sex, levels = c("Male", "Female"))
 merged$age_new <- as.numeric(merged$Assessment_Date_Night - as.Date(merged$dob)) / 365.25
 
 linear <- lmer(SRI2_scaled ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
@@ -548,26 +550,30 @@ nonlinear <- gamm(
   method = "REML"
 )
 
+
 nonlinear_order <- gamm(
-  SRI2_scaled ~ fhr2 + sex + weekend + s(age, k = 5) +
+  SRI2_scaled ~ fhr2 + sex2 + weekend + s(age, k = 5) +
     s(age, by = fhr2, k = 5),       # additional smooth for FHR
   random = list(fid = ~1, subject_id = ~1),
   data = merged,
   method = "REML"
 )
+
 summary(nonlinear_order$gam)
 
 
-
 gam.check(nonlinear_order$gam)
-draw(nonlinear_order)
+draw(nonlinear_order_file)
 
 ##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p_sri <- 0.0132
-pbonf_sri <- 0.0132*3 
+p_sri <- 0.0376
 
-AIC(linear, nonlinear_order$lme)
 BIC(linear, nonlinear$lme)
+
+
+p <- c(0.00908, 0.00361, 0.0376)
+
+p.adjust(p, method = "BH")
 
 ```
 
@@ -671,7 +677,7 @@ SRIdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
 #B380B3   #8E4A8E
   # ---- Significant: 18.32 → 25 ----
   geom_ribbon(
-    data = subset(bands, age >= 8 & age < 17.6),
+    data = subset(bands, age >= 8 & age < 17.9),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
@@ -679,14 +685,14 @@ SRIdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   
     # ---- Significant: 18.32 → 25 ----
   geom_ribbon(
-    data = subset(bands, age >= 17.6 & age <= 21.6),
+    data = subset(bands, age >= 17.9 & age <= 21.1),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#8E4A8E",
     alpha = 0.5
   ) +
   
   geom_ribbon(
-    data = subset(bands, age > 21.6 & age <= 25),
+    data = subset(bands, age > 21.1 & age <= 25),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
@@ -713,13 +719,19 @@ SRIdiff
 #####Combo Graph
 ```{r}
 SRIoutput <- SRIoutput +
+  labs(tag = "(A)") +
   theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
     plot.margin = margin(10, 10, 10, 10)
   )
 
 SRIdiff <- SRIdiff +
+  labs(tag = "(B)") +
   theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
     plot.margin = margin(10, 10, 10, 10)
   )
@@ -729,7 +741,7 @@ library(patchwork)
 SRIcombo <- SRIoutput + SRIdiff +
   plot_layout(ncol = 2, widths = c(1, 1)) +
   plot_annotation(
-    title = "Sleep Regularity Trajectories and Group Differences",
+    title = "",
     theme = theme(
       plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
       plot.margin = margin(15, 15, 15, 15)
