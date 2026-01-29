@@ -132,9 +132,9 @@ NightM <- NightM %>%
   filter(!str_detect(Subject_ID, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
 setDT(NightM)
 NightM[, Assessment_Date := as.Date(sdate)]
-NightM$Assessment_date_nightM <- NightM$Assessment_Date
+NightM$Assessment_Date_Night <- NightM$Assessment_Date
 merged2 <- NightM[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-merged2[, diffdays := abs(as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
+merged2[, diffdays := abs(as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
 merged2 <- merged2 %>% filter(diffdays >= 0 & diffdays <= 100)
 merged2$motionlogger <- 1
 
@@ -150,9 +150,7 @@ length(unique(merged$subject_id))
 merged <- merged %>%
   mutate(fhr = ifelse(group %in% c(1, 2, 3), 1, 0))
 
-merged$weekend <- ifelse(merged$weekday %in% 
-                         c("Sat", "Saturday", "Sun", "Sunday"), 1, 0)
-
+merged$weekend <- ifelse(merged$weekday %in% c("Fri", "Friday", "Sat", "Saturday"), 1, 0)
 #Labeling
 merged$fhr <- factor(merged$fhr,
                        levels = c(0, 1),
@@ -182,6 +180,11 @@ merged <- merged %>%
     bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1))
   )
 
+merged1 <- merged %>%
+  group_by(subject_id) %>%
+  mutate(num_obs = n()) %>%
+  ungroup()
+
 merged <- merged %>%
   group_by(filename) %>%   # or filename
   filter(
@@ -196,6 +199,7 @@ merged <- merged %>%
 ```{r}
 mod1 <- lmer(SleepDurationInSpt ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
 summary(mod1)
+
 resid_mod1 <- resid(mod1)
 qqnorm(resid_mod1)
 hist(resid_mod1, breaks = 40, main = "Histogram of Residuals", xlab = "Residuals")
@@ -456,6 +460,7 @@ ggsave(
 ```{r}
 #This will show difference in smooth factors
 merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
+merged1$fhr2 <- ordered(merged1$fhr, levels = c("Control", "FHR"))
 linear <- lmer(SleepDurationInSpt ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
 
 nonlinear <- gamm(
@@ -466,6 +471,7 @@ nonlinear <- gamm(
   method = "REML"
 )
 
+
 nonlinear_order <- gamm(
   SleepDurationInSpt ~ fhr2 + sex + weekend + s(age, k = 5) + 
     s(age, by = fhr2, k = 5),
@@ -473,19 +479,17 @@ nonlinear_order <- gamm(
   data = merged,
   method = "REML"
 )
+
 summary(nonlinear_order$gam)
+
 
 
 gam.check(nonlinear_order$gam)
 draw(nonlinear_order)
 
-
-#BIC(linear, nonlinear_order)
-
-AIC(linear, nonlinear_order$lme)
 BIC(linear, nonlinear_order$lme)
-p_tst <- 0.0112
-pbonf_tst <- 0.0112*3
+p_tst <- 0.00908
+
 
 
 gam.check(nonlinear_order$gam)
@@ -586,7 +590,7 @@ TSToutput
 bands <- (confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 20000, level = 0.95, type = "simultaneous"))
 draw(bands)
 
-(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 300, level = 0.95, type = "simultaneous"))
 
 
 TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
@@ -599,7 +603,7 @@ TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
 ) +
   # ---- Insignificant: 8 → 18.32 ----
   geom_ribbon(
-    data = subset(bands, age >= 8 & age < 20.6),
+    data = subset(bands, age >= 8 & age < 20.48),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
@@ -607,7 +611,7 @@ TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   
       # ---- Significant: 10 → 14.04 ----
   geom_ribbon(
-    data = subset(bands, age >= 20.6 & age <= 20.79),
+    data = subset(bands, age >= 20.48 & age <= 20.9),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#8E4A8E",
     alpha = 0.5
@@ -616,7 +620,7 @@ TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   
     # ---- Insignificant: 8 → 18.32 ----
   geom_ribbon(
-    data = subset(bands, age > 20.79 & age <= 25),
+    data = subset(bands, age > 20.9 & age <= 25),
     aes(ymin = .lower_ci, ymax = .upper_ci),
     fill  = "#B380B3",
     alpha = 0.25
@@ -639,23 +643,30 @@ TSTdiff
 ####Graph combine
 ```{r}
 TSToutput <- TSToutput +
+  labs(tag = "(A)") +
   theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
     plot.margin = margin(10, 10, 10, 10)
   )
 
+
 TSTdiff <- TSTdiff +
+  labs(tag = "(B)") +
   theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
     plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
     plot.margin = margin(10, 10, 10, 10)
   )
+
 
 
 library(patchwork)
 TSTcombo <- TSToutput + TSTdiff +
   plot_layout(ncol = 2, widths = c(1, 1)) +
   plot_annotation(
-    title = "Sleep Duration Trajectories and Group Differences",
     theme = theme(
       plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
       plot.margin = margin(15, 15, 15, 15)
