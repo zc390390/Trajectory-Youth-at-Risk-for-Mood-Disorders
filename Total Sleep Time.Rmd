@@ -195,7 +195,429 @@ merged <- merged %>%
 ```
 
 #Main Analysis
-##Linear
+##Nonlinear
+```{r}
+#This will show difference in smooth factors
+merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
+merged$fid_new <- as.factor(substr(merged$Subject_ID, 1, 8))
+merged1$fhr2 <- ordered(merged1$fhr, levels = c("Control", "FHR"))
+linear <- lmer(SleepDurationInSpt ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
+
+nonlinear <- gamm(
+  SleepDurationInSpt ~ fhr + sex + weekend + 
+    s(age, by = fhr, k = 5),
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+
+nonlinear_order <- gamm(
+  SleepDurationInSpt ~ fhr2 + sex + weekend + s(age, k = 5) + 
+    s(age, by = fhr2, k = 5),
+  random = list(fid_new = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+summary(nonlinear_order$gam)
+
+
+
+gam.check(nonlinear_order$gam)
+draw(nonlinear_order)
+
+BIC(linear, nonlinear_order$lme)
+p_tst <- 0.0197
+f <- 3.666
+
+
+
+gam.check(nonlinear_order$gam)
+draw(nonlinear_order)
+```
+
+###Visualization
+####Graph A
+```{r}
+#Take The Smooths of Both of our Groups
+diff <- difference_smooths(nonlinear$gam,
+                           select = "s(age)",
+                           by = "fhr",
+                           comp = list(fhr = c("FHR", "Control")))
+
+
+
+
+
+# 5. Create predicted trajectories by group for ggplot
+
+# Create new data for prediction (age sequence)
+age_seq <- seq(min(merged$age, na.rm = TRUE),
+               max(merged$age, na.rm = TRUE),
+               length.out = 200)
+
+# Create a new data frame with average covariate values
+newdat <- expand.grid(
+  age = age_seq,
+  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
+  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
+  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
+)
+
+# Assign one subject ID (for random effects if included)
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+
+pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
+
+newdat$fit <- pred$fit
+ newdat$se <- pred$se.fit
+ z <- qnorm(0.975)  # 1.96
+ newdat <- newdat %>%
+   mutate(
+     lower = fit - z * se,
+     upper = fit + z * se
+   )
+
+# 6. Plot adjusted smooths for groups with ggplot
+sum <- merged %>%
+  group_by(filename) %>%
+    summarise(
+      TSTm = mean(SleepDurationInSpt, na.rm = TRUE),
+      age = mean(age, na.rm = TRUE),
+      fhr = first(fhr)
+    )
+
+
+TSToutput <- ggplot() +
+  # Raw data
+  geom_point(data = sum,
+             aes(x = age, y = TSTm, color = fhr),
+             alpha = 0.25, size = 1.2) +
+  
+  
+  # Model predictions
+  geom_line(data = newdat,
+            aes(x = age, y = fit, color = fhr),
+            size = 1.2) +
+     geom_ribbon(data = newdat, aes(x = age, ymin = lower, ymax = upper, fill = fhr), alpha = 0.25, color = NA) +
+  
+  # Scales
+  scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
+  scale_fill_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
+  scale_y_continuous(limits = c(4, 10), breaks = seq(4, 10, by = 2)) +
+  
+  labs(title = "Observed and Modelled Sleep Duration by Group",
+       x = "Age",
+       y = "Sleep Duration (hours)",
+       color = "Group",
+       fill = "Group") + 
+  theme_minimal()
+TSToutput
+```
+
+
+####Graph B
+```{r}
+#Differences
+bands <- (confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 20000, level = 0.95, type = "simultaneous"))
+draw(bands)
+
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 300, level = 0.95, type = "simultaneous"))
+
+
+TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
+  
+  geom_hline(yintercept = 0, linewidth = 0.8) + 
+  
+  scale_x_continuous(
+  limits = c(8, 25),
+  breaks = seq(8, 25, by = 5)
+) +
+  
+    
+      # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age >= 8 & age < 8.9),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+  
+  
+  # ---- Insignificant: 8 → 18.32 ----
+  geom_ribbon(
+    data = subset(bands, age >= 8.9 & age < 19.64),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+  
+      # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age >= 19.64 & age <= 21.6),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+  
+  
+    # ---- Insignificant: 8 → 18.32 ----
+  geom_ribbon(
+    data = subset(bands, age > 21.6 & age <= 25),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+  
+  geom_line(linewidth = 1.3) +
+
+  labs(
+    title = "Age-varying difference in total sleep time",
+    x = "Age (years)",
+    y = "Difference in predicted total sleep time"
+  ) +
+
+  theme_minimal()
+
+TSTdiff
+```
+
+
+####Graph combine
+```{r}
+TSToutput <- TSToutput +
+  labs(tag = "(A)") +
+  theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+
+TSTdiff <- TSTdiff +
+  labs(tag = "(B)") +
+  theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+
+
+library(patchwork)
+TSTcombo <- TSToutput + TSTdiff +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    theme = theme(
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      plot.margin = margin(15, 15, 15, 15)
+    )
+  )
+
+TSTcombo
+
+ggsave(
+  "TST_Patchwork.png",
+  plot = TSTcombo,
+  width = 8.5, height = 6.5, units = "in", dpi = 600,
+  bg = "white"
+)
+```
+
+###Table output
+```{r}
+library(dplyr)
+library(tibble)
+library(flextable)
+library(broom.mixed)
+library(officer)
+
+#========================
+# Helper functions
+#========================
+sig_stars <- function(p) {
+  dplyr::case_when(
+    is.na(p)  ~ "",
+    p < 0.001 ~ "***",
+    p < 0.01  ~ "**",
+    p < 0.05  ~ "*",
+    p < 0.10  ~ ".",
+    TRUE      ~ ""
+  )
+}
+fmt_num <- function(x, digits = 2) sprintf(paste0("%.", digits, "f"), x)
+
+#========================
+# FIXED EFFECTS (RAW -> formatted)
+#========================
+raw_fixed <- broom.mixed::tidy(
+  nonlinear_order$lme,
+  effects = "fixed",
+  conf.int = TRUE
+)
+
+keep_terms <- c("X(Intercept)", "Xfhr2.L", "XsexFemale", "XweekendWeekend")
+
+mod1 <- raw_fixed %>%
+  filter(term %in% keep_terms) %>%
+  mutate(
+    term = recode(
+      term,
+      "X(Intercept)"    = "Intercept",
+      "Xfhr2.L"         = "FHR (Group)",
+      "XsexFemale"      = "Sex (Female)",
+      "XweekendWeekend" = "Weekend",
+      .default = term
+    ),
+    stars = sig_stars(p.value),
+    `Effect (95% CI)` = paste0(
+      fmt_num(estimate, 2),
+      " (", fmt_num(conf.low, 2), ", ", fmt_num(conf.high, 2), ")",
+      stars
+    )
+  ) %>%
+  select(term, `Effect (95% CI)`)
+
+
+#========================
+# SMOOTH TERMS (edf + F + stars)
+#========================
+smooth_table <- as.data.frame(summary(nonlinear_order$gam)$s.table)
+
+tbl_smooth <- smooth_table %>%
+  rownames_to_column("term") %>%
+  mutate(
+    term = recode(
+      term,
+      "s(age)"         = "Smooth(Age)",
+      "s(age):fhr2FHR" = "Smooth(Age) × FHR"
+    ),
+    stars = sig_stars(`p-value`),
+    `Effect (95% CI)` = paste0(
+      fmt_num(F, 2), " (edf=", fmt_num(edf, 2), ")",
+      stars
+    )
+  ) %>%
+  select(term, `Effect (95% CI)`)
+
+#========================
+# Divider row + Combine
+#========================
+divider <- tibble(
+  term = "Smooth Terms",
+  `Effect (95% CI)` = ""
+)
+
+combined_df <- bind_rows(
+  mod1,
+  divider,
+  tbl_smooth
+)
+
+combined_table <- flextable(combined_df) %>%
+  set_caption("Model: Total Sleep Time — General Additive Model") %>%
+  bold(i = nrow(mod1) + 1, j = 1, part = "body") %>%
+  hline(
+    i = nrow(mod1) + 1,
+    border = officer::fp_border(width = 0.75),
+    part = "body"
+  ) %>%
+  add_footer_lines(
+    values = paste0(
+      "Note. Values are reported as β (95% confidence interval). ",
+      "For smooth terms, values are reported as F statistics with effective degrees of freedom (edf) in parentheses. ",
+      "* p < .05, ** p < .01, *** p < .001."
+    )
+  ) %>%
+  italic(part = "footer") %>%
+  autofit()
+
+save_as_docx(
+  "Model: Total Sleep Time — GAM" = combined_table,
+  path = "TST_GAM_Table.docx"
+)
+```
+
+###Predict
+
+```{r}
+newdat <- expand.grid(
+  age = 20,
+  fhr2 = levels(merged$fhr2),
+  sex = levels(merged$sex)[1],
+  weekend = levels(merged$weekend)[1]
+)
+
+# Make sure factor levels match
+newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
+newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
+newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
+
+# Predict from GAM (population-level)
+pred_20 <- predict(
+  nonlinear_order$gam,
+  newdata = newdat,
+  type = "response",
+  se.fit = TRUE
+)
+
+# Combine with newdat
+out <- cbind(newdat, fit = pred_20$fit, se = pred_20$se.fit)
+
+out
+```
+
+### Basis fucntions
+```{r}
+b <- gam(
+  SleepDurationInSpt ~ fhr + sex + weekend + s(age, by = fhr, k = 5),
+  data = merged,
+  fit = FALSE
+)
+
+X <- b$X
+colnames(X) <- paste0("basis_", seq_len(ncol(X)))
+
+basis_df <- data.frame(
+  age = merged$age,
+  fhr = merged$fhr,
+  X
+)
+
+basis_long <- basis_df %>%
+  pivot_longer(starts_with("basis_"),
+               names_to = "basis",
+               values_to = "value") %>%
+  filter(!basis %in% paste0("basis_", 1:4))
+
+
+p <- ggplot() +
+  geom_line(
+    data = basis_long,
+    aes(x = age, y = value + 7.75, group = basis, color = basis),
+    linewidth = 0.9
+  ) +
+  geom_point(
+    data = sum,
+    aes(x = age, y = TSTm, color = fhr),
+    alpha = 0.25, size = 1.2
+  ) +
+  facet_wrap(~fhr) +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Basis functions and observed data for TST",
+    x = "Age",
+    y = "Total Sleep Time (hours)"
+  )
+
+ggsave("basis_tst_plot.png", p, width = 12, height = 6, dpi = 300)
+
+```
+
+## Linear
 ```{r}
 mod1 <- lmer(SleepDurationInSpt ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
 summary(mod1)
@@ -208,10 +630,19 @@ mod2 <- lmer(SleepDurationInSpt ~ group*age + sex + weekend + (1|fid/subject_id)
 summary(mod2)
 ```
 
-###Table
+### Table
 ```{r}
+library(dplyr)
+library(broom.mixed)
+library(flextable)
+library(officer)
+library(dplyr)
+library(broom.mixed)
+library(flextable)
+library(officer)
+
 apa_format <- function(model){
-  tidy(model, effects = "fixed", conf.int = TRUE) %>%
+  broom.mixed::tidy(model, effects = "fixed", conf.int = TRUE) %>%
     mutate(
       Predictor = recode(term,
         "(Intercept)"     = "Intercept",
@@ -225,21 +656,18 @@ apa_format <- function(model){
         "sexFemale"       = "Sex (Female)",
         "weekendWeekend"  = "Weekend"
       ),
-      `b (SE)` = sprintf("%.2f (%.2f)", estimate, std.error),
-      CI = sprintf("[%.2f, %.2f]", conf.low, conf.high),
-      p = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
+      stars = dplyr::case_when(
+        p.value < .001 ~ "***",
+        p.value < .01  ~ "**",
+        p.value < .05  ~ "*",
+        TRUE           ~ ""
+      ),
+      `β [95% CI]` = sprintf("%.2f%s [%.2f, %.2f]", estimate, stars, conf.low, conf.high)
     ) %>%
-    select(Predictor, `b (SE)`, CI, p)
+    select(Predictor, `β [95% CI]`)
 }
 
 m1 <- apa_format(mod1)
-m2 <- apa_format(mod2)
-
-combined <- full_join(
-  m1 %>% rename(b1 = `b (SE)`, CI1 = CI, p1 = p),
-  m2 %>% rename(b2 = `b (SE)`, CI2 = CI, p2 = p),
-  by = "Predictor"
-)
 
 order_terms <- c(
   "Intercept",
@@ -254,40 +682,36 @@ order_terms <- c(
   "Weekend"
 )
 
-combined <- combined %>%
+m1 <- m1 %>%
   mutate(Predictor = factor(Predictor, levels = order_terms)) %>%
-  arrange(Predictor) %>%
-  replace(is.na(.), "")
+  arrange(Predictor)
 
-
-ft <- flextable(combined) %>%
+ft <- flextable(m1) %>%
   set_header_labels(
     Predictor = "Predictor",
-    b1 = "β (SE)",
-    CI1 = "95% CI",
-    p1 = "p",
-    b2 = "β (SE)",
-    CI2 = "95% CI",
-    p2 = "p"
+    `β [95% CI]` = "β [95% CI]"
   ) %>%
   add_header_row(
-    values = c("", "Model 1", "Model 1", "Model 1",
-                  "Model 2", "Model 2", "Model 2"),
-    colwidths = c(1,1,1,1,1,1,1)
+    values = c("", "Model 1"),
+    colwidths = c(1, 1)
   ) %>%
   merge_h(part = "header") %>%
   autofit() %>%
-  align(j = 2:7, align = "center") %>%
+  align(j = 2, align = "center") %>%
   align(j = 1, align = "left") %>%
-  bold(part = "header")
+  bold(part = "header") %>%
+  add_footer_lines(values = c(
+    "Note. Values are β with 95% confidence intervals in brackets.",
+    "* p < .05. ** p < .01. *** p < .001."
+  ))
 
 ft
 
-
 save_as_docx(
-  "Linear Mixed Models Predicting TST" = ft,
-  path = "TST_TwoModel_APA_Table.docx"
+  "Linear Mixed Model Predicting TST (Model 1)" = ft,
+  path = "TST_Model1_APA_LMER_Table.docx"
 )
+
 ```
 
 
@@ -456,421 +880,6 @@ ggsave(
 )
 ```
 
-##Nonlinear
-```{r}
-#This will show difference in smooth factors
-merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
-merged1$fhr2 <- ordered(merged1$fhr, levels = c("Control", "FHR"))
-linear <- lmer(SleepDurationInSpt ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
-
-nonlinear <- gamm(
-  SleepDurationInSpt ~ fhr + sex + weekend + 
-    s(age, by = fhr, k = 5),
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-
-nonlinear_order <- gamm(
-  SleepDurationInSpt ~ fhr2 + sex + weekend + s(age, k = 5) + 
-    s(age, by = fhr2, k = 5),
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-summary(nonlinear_order$gam)
-
-
-
-gam.check(nonlinear_order$gam)
-draw(nonlinear_order)
-
-BIC(linear, nonlinear_order$lme)
-p_tst <- 0.00908
-
-
-
-gam.check(nonlinear_order$gam)
-draw(nonlinear_order)
-```
-
-###Visualization
-####Graph A
-```{r}
-#Take The Smooths of Both of our Groups
-diff <- difference_smooths(nonlinear$gam,
-                           select = "s(age)",
-                           by = "fhr",
-                           comp = list(fhr = c("FHR", "Control")))
-
-
-
-
-
-# 5. Create predicted trajectories by group for ggplot
-
-# Create new data for prediction (age sequence)
-age_seq <- seq(min(merged$age, na.rm = TRUE),
-               max(merged$age, na.rm = TRUE),
-               length.out = 200)
-
-# Create a new data frame with average covariate values
-newdat <- expand.grid(
-  age = age_seq,
-  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
-)
-
-# Assign one subject ID (for random effects if included)
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-
-pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
-
-newdat$fit <- pred$fit
- newdat$se <- pred$se.fit
- z <- qnorm(0.975)  # 1.96
- newdat <- newdat %>%
-   mutate(
-     lower = fit - z * se,
-     upper = fit + z * se
-   )
-
-# 6. Plot adjusted smooths for groups with ggplot
-sum <- merged %>%
-  group_by(filename) %>%
-    summarise(
-      TSTm = mean(SleepDurationInSpt, na.rm = TRUE),
-      age = mean(age, na.rm = TRUE),
-      fhr = first(fhr)
-    )
-
-
-TSToutput <- ggplot() +
-  # Raw data
-  geom_point(data = sum,
-             aes(x = age, y = TSTm, color = fhr),
-             alpha = 0.25, size = 1.2) +
-  
-  
-  # Model predictions
-  geom_line(data = newdat,
-            aes(x = age, y = fit, color = fhr),
-            size = 1.2) +
-     geom_ribbon(data = newdat, aes(x = age, ymin = lower, ymax = upper, fill = fhr), alpha = 0.25, color = NA) +
-  
-  # Scales
-  scale_color_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
-  scale_fill_manual(values = c("Control" = "#6699FF", "FHR" = "#FF6666")) +
-  scale_y_continuous(limits = c(4, 10), breaks = seq(4, 10, by = 2)) +
-  
-  labs(title = "Observed and Modelled Sleep Duration by Group",
-       x = "Age",
-       y = "Sleep Duration (hours)",
-       color = "Group",
-       fill = "Group") + 
-  annotate(
-  "text",
-  x = min(newdat$age) + 0.5,
-  y = 4.2,
-  label = expression(bold(italic("p"))[BONF.] == 0.033),
-  parse = TRUE,
-  hjust = 0
-) +
-  theme_minimal()
-TSToutput
-```
-
-
-####Graph B
-```{r}
-#Differences
-bands <- (confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 20000, level = 0.95, type = "simultaneous"))
-draw(bands)
-
-(confint(nonlinear_order$gam, "s(age):fhr2FHR", n = 300, level = 0.95, type = "simultaneous"))
-
-
-TSTdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
-  
-  geom_hline(yintercept = 0, linewidth = 0.8) + 
-  
-  scale_x_continuous(
-  limits = c(8, 25),
-  breaks = seq(8, 25, by = 5)
-) +
-  # ---- Insignificant: 8 → 18.32 ----
-  geom_ribbon(
-    data = subset(bands, age >= 8 & age < 20.48),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#B380B3",
-    alpha = 0.25
-  ) +
-  
-      # ---- Significant: 10 → 14.04 ----
-  geom_ribbon(
-    data = subset(bands, age >= 20.48 & age <= 20.9),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#8E4A8E",
-    alpha = 0.5
-  ) +
-  
-  
-    # ---- Insignificant: 8 → 18.32 ----
-  geom_ribbon(
-    data = subset(bands, age > 20.9 & age <= 25),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#B380B3",
-    alpha = 0.25
-  ) +
-  
-  geom_line(linewidth = 1.3) +
-
-  labs(
-    title = "Age-varying difference in total sleep time",
-    x = "Age (years)",
-    y = "Difference in predicted total sleep time"
-  ) +
-
-  theme_minimal()
-
-TSTdiff
-```
-
-
-####Graph combine
-```{r}
-TSToutput <- TSToutput +
-  labs(tag = "(A)") +
-  theme(
-    plot.tag = element_text(size = 14, face = "bold"),
-    plot.tag.position = c(0, 1),   # top-left
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
-
-TSTdiff <- TSTdiff +
-  labs(tag = "(B)") +
-  theme(
-    plot.tag = element_text(size = 14, face = "bold"),
-    plot.tag.position = c(0, 1),   # top-left
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
-
-
-library(patchwork)
-TSTcombo <- TSToutput + TSTdiff +
-  plot_layout(ncol = 2, widths = c(1, 1)) +
-  plot_annotation(
-    theme = theme(
-      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
-      plot.margin = margin(15, 15, 15, 15)
-    )
-  )
-
-TSTcombo
-
-ggsave(
-  "TST_Patchwork.png",
-  plot = TSTcombo,
-  width = 8.5, height = 6.5, units = "in", dpi = 600,
-  bg = "white"
-)
-```
-
-###Table output
-```{r}
-library(dplyr)
-library(flextable)
-library(broom.mixed)
-library(tibble)
-
-#========================
-# FIXED EFFECTS
-#========================
-mod1 <- broom.mixed::tidy(nonlinear_order$lme,
-                          effects = "fixed",
-                          conf.int = TRUE)
-
-# remove spline basis coefficients
-mod1 <- mod1 %>% filter(!grepl("^Xs", term))
-
-format_model <- function(model_df) {
-  model_df %>%
-    mutate(
-      term = recode(term,
-        "X(Intercept)"        = "Intercept",
-        "Xfhr2.L"             = "FHR (Group)",
-        "XsexFemale"          = "Sex (Female)",
-        "XweekendWeekend"     = "Weekend"
-      ),
-      `b (SE)`   = sprintf("%.2f (%.2f)", estimate, std.error),
-      `95% CI`   = sprintf("[%.2f, %.2f]", conf.low, conf.high),
-      `p value`  = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
-    ) %>%
-    select(term, `b (SE)`, `95% CI`, `p value`)
-}
-
-tbl_fixed <- format_model(mod1)
-
-#========================
-# SMOOTH TERMS
-#========================
-smooth_table <- as.data.frame(summary(nonlinear_order$gam)$s.table)
-
-tbl_smooth <- smooth_table %>%
-  tibble::rownames_to_column("term") %>%
-  mutate(
-    term = recode(
-      term,
-      "s(age)"             = "Smooth(Age)",
-      "s(age):fhr2FHR"     = "Smooth(Age) × FHR"
-    ),
-    edf = sprintf("%.2f", edf),
-    F   = sprintf("%.2f", F),
-    `p value` = ifelse(`p-value` < .001, "<.001", sprintf("%.3f", `p-value`))
-  ) %>%
-  select(term, edf, F, `p value`)
-
-#========================
-# BUILD ONE TABLE
-#========================
-# Create divider row
-divider <- tibble(
-  term = "Smooth Terms",
-  `b (SE)` = NA,
-  `95% CI` = NA,
-  `p value` = NA
-)
-
-# Rename smooth-term columns to match fixed layout
-tbl_smooth_fmt <- tbl_smooth %>%
-  rename(`b (SE)` = edf,
-         `95% CI` = F)
-
-# Bind everything together
-combined_df <- bind_rows(
-  tbl_fixed,
-  divider,
-  tbl_smooth_fmt
-)
-
-combined_table <- flextable(combined_df) %>%
-  set_caption("Model: Total Sleep Time — General Additive Model") %>%
-  bold(i = nrow(tbl_fixed) + 1, j = 1) %>%   # bold the "Smooth Terms" row
-  autofit()
-
-save_as_docx(
-  "Model: Total Sleep Time — GAM" = combined_table,
-  path = "TST_GAM_Table.docx"
-)
-
-```
-
-###Age Output
-```{r}
-newdat <- expand.grid(
-  age = 18,
-  fhr = factor(c("Control", "FHR"), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))
-)
-
-# Assign one subject ID (for random effects if included)
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-
-pred_fit <- predict(
-  nonlinear$gam,
-  newdata = newdat,
-  type = "response",
-  exclude = "s(subject_id)"
-)
-
-cbind(newdat, pred = pred_fit)
-```
-
-
-###Basis fucntions
-```{r}
-b <- gam(
-  SleepDurationInSpt ~ fhr + sex + weekend + s(age, by = fhr, k = 5),
-  data = merged,
-  fit = FALSE
-)
-
-X <- b$X
-colnames(X) <- paste0("basis_", seq_len(ncol(X)))
-
-basis_df <- data.frame(
-  age = merged$age,
-  fhr = merged$fhr,
-  X
-)
-
-basis_long <- basis_df %>%
-  pivot_longer(starts_with("basis_"),
-               names_to = "basis",
-               values_to = "value") %>%
-  filter(!basis %in% paste0("basis_", 1:4))
-
-
-p <- ggplot() +
-  geom_line(
-    data = basis_long,
-    aes(x = age, y = value + 7.75, group = basis, color = basis),
-    linewidth = 0.9
-  ) +
-  geom_point(
-    data = sum,
-    aes(x = age, y = TSTm, color = fhr),
-    alpha = 0.25, size = 1.2
-  ) +
-  facet_wrap(~fhr) +
-  theme_minimal(base_size = 16) +
-  labs(
-    title = "Basis functions and observed data for TST",
-    x = "Age",
-    y = "Total Sleep Time (hours)"
-  )
-
-ggsave("basis_tst_plot.png", p, width = 12, height = 6, dpi = 300)
-
-
-
-```
-
-#Exploration
-```{r}
-newdat <- expand.grid(
-  age = 18,
-  fhr2 = levels(merged$fhr2),
-  sex = levels(merged$sex)[1],
-  weekend = levels(merged$weekend)[1]
-)
-
-# Make sure factor levels match
-newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
-newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
-newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
-
-# Predict from GAM (population-level)
-pred_18 <- predict(
-  nonlinear_order$gam,
-  newdata = newdat,
-  type = "response",
-  se.fit = TRUE
-)
-
-# Combine with newdat
-out <- cbind(newdat, fit = pred_18$fit, se = pred_18$se.fit)
-
-out
-```
 
 
 

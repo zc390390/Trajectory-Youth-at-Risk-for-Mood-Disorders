@@ -54,16 +54,7 @@ output: html_document
 ```
 
 #Load Data
-```{r}
-# setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
-setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
-# setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
-#setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer
 
-FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character())) 
-Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character())) 
-NightM <- read_excel("motionloggerdata.xlsx")
-```
 
 
 #Non-Mean Exploration
@@ -76,7 +67,7 @@ NightM <- read_excel("motionloggerdata.xlsx")
 
 
 
-FOR <- readr::read_csv("FOR2.csv", col_types = cols(.default = col_character()))
+FOR <- readr::read_csv("analytic-zach.csv", col_types = cols(.default = col_character()))
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
 NightM <- read_excel("motionloggerdata.xlsx")
 
@@ -223,21 +214,484 @@ merged <- merged %>%
 ```
 
 #Main Analysis
+##Nonlinear 
+###Main
+```{r}
+##Mid Point
+merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
+merged$fid_new <- as.factor(substr(merged$Subject_ID, 1, 8))
+
+linear <- lmer(midpoint ~ fhr2*age + sex + weekend + (1|fid_new/subject_id), data = merged)
+
+nonlinear <- gamm(
+  midpoint ~ fhr + sex + weekend + 
+    s(age, by = fhr, k = 5),        # additional smooth for FHR
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+nonlinear_order <- gamm(
+  midpoint ~ fhr2 + sex + weekend + s(age, k = 5) +
+    s(age, by = fhr2, k = 5),        # additional smooth for FHR
+  random = list(fid_new = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+summary(nonlinear_order$gam)
+
+##Below p value is from the summary, there is likely a way to automate finding it but I dont care
+p_mid <-  0.000518
+f <- 12.08
+
+BIC(linear, nonlinear_order$lme)
+```
+###Visualization
+####Graph A
+```{r}
+age_seq <- seq(min(merged$age), max(merged$age), length.out = 200)
+
+# Create a new data frame with average covariate values
+newdat <- expand.grid(
+  age = age_seq,
+  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
+  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
+  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
+)
+
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+
+pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
+
+newdat$fit <- pred$fit
+newdat$se <- pred$se.fit
+z <- qnorm(0.975)  # 1.96
+newdat <- newdat %>%
+  mutate(
+    lower = fit - z * se,
+    upper = fit + z * se
+  )
+
+# 6. Plot adjusted smooths for groups with ggplot
+sum <- merged %>%
+  group_by(filename) %>%
+    summarise(
+      MIDm = mean(midpoint, na.rm = TRUE),
+      age = mean(age, na.rm = TRUE),
+      fhr = first(fhr)
+    )
+
+mgcv::plot.gam(nonlinear$gam)
+MIDoutput <- ggplot() +
+  # Raw data
+  geom_point(data = sum,
+             aes(x = age, y = MIDm, color = fhr),
+             alpha = 0.25, size = 1.2) +
+  
+  # Model predictions
+  geom_line(data = newdat,
+            aes(x = age, y = fit, color = fhr),
+            size = 1.2) +
+  geom_ribbon(data = newdat,
+              aes(x = age, ymin = lower, ymax = upper, fill = fhr),
+              alpha = 0.25, color = NA) +
+  
+  # Scales (match both color & fill and give them the same legend title)
+  scale_color_manual(
+    name = "Group",                # 👈 ensures both share same legend title
+    values = c("Control" = "#6699FF", "FHR" = "#FF6666")
+  ) +
+  scale_fill_manual(
+    name = "Group",                # 👈 must be identical to color's 'name'
+    values = c("Control" = "#6699FF", "FHR" = "#FF6666")
+  ) +
+  
+scale_y_continuous(
+  limits = c(0, 8),
+  breaks = seq(0, 8, by = 2),
+  labels = c("12:00 AM", "2:00 AM", "4:00 AM", "6:00 AM", "8:00 AM")
+) +
+  labs(
+    title = "Observed and Modelled Sleep Midpoint by Group",
+    x = "Age",
+    y = "Sleep Midpoint"
+  ) + 
+  theme_minimal()
+MIDoutput
+```
+
+####Graph B
+```{r}
+#Differences
+bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
+(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
+
+MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
+  
+  geom_hline(yintercept = 0, linewidth = 0.8) + 
+  
+  scale_x_continuous(
+  limits = c(8, 25),
+  breaks = seq(10, 25, by = 5)
+) +
+  
+    # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age >= 8 & age <= 13),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+  
+    # ---- Insignificant: 14.04 → 17.5 ----
+  geom_ribbon(
+    data = subset(bands, age > 13 & age <= 16.45),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#B380B3",
+    alpha = 0.25
+  ) +
+
+  # ---- Significant: 10 → 14.04 ----
+  geom_ribbon(
+    data = subset(bands, age > 16.45 & age <= 25),
+    aes(ymin = .lower_ci, ymax = .upper_ci),
+    fill  = "#8E4A8E",
+    alpha = 0.5
+  ) +
+
+  geom_line(linewidth = 1.3) +
+
+  labs(
+    title = "Age-varying difference in midpoint",
+    x = "Age (years)",
+    y = "Difference in predicted midpoint"
+  ) +
+
+  theme_minimal()
+
+MIDdiff
+
+
+
+
+```
+
+####Combined Graph
+```{r}
+  library(patchwork)
+
+MIDoutput <- MIDoutput +
+  labs(tag = "(A)") +
+  theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+MIDdiff <- MIDdiff +
+  labs(tag = "(B)") +
+  theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1),   # top-left
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+MIDcombo <- MIDoutput + MIDdiff +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    title = "",
+    theme = theme(
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      plot.margin = margin(15, 15, 15, 15)
+    )
+  )
+MIDcombo
+ggsave(
+  "MID_Patchwork.png",
+  plot = MIDcombo,
+  width = 8.5, height = 6.5, units = "in", dpi = 600,
+  bg = "white"
+)
+
+
+```
+
+####Age get
+```{r}
+newdat <- expand.grid(
+  age = 18,
+  fhr = factor(c("Control", "FHR"), levels = levels(merged$fhr)),
+  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),
+  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))
+)
+
+# Assign one subject ID (for random effects if included)
+newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
+
+pred_fit <- predict(
+  nonlinear$gam,
+  newdata = newdat,
+  type = "response",
+  exclude = "s(subject_id)"
+)
+
+cbind(newdat, pred = pred_fit)
+```
+
+###Table
+```{R}
+#========================
+# Helper functions
+#========================
+sig_stars <- function(p) {
+  dplyr::case_when(
+    is.na(p)  ~ "",
+    p < 0.001 ~ "***",
+    p < 0.01  ~ "**",
+    p < 0.05  ~ "*",
+    p < 0.10  ~ ".",
+    TRUE      ~ ""
+  )
+}
+fmt_num <- function(x, digits = 2) sprintf(paste0("%.", digits, "f"), x)
+
+#========================
+# FIXED EFFECTS (RAW -> formatted)
+#========================
+raw_fixed <- broom.mixed::tidy(
+  nonlinear_order$lme,
+  effects = "fixed",
+  conf.int = TRUE
+)
+
+keep_terms <- c("X(Intercept)", "Xfhr2.L", "XsexFemale", "XweekendWeekend")
+
+mod1 <- raw_fixed %>%
+  filter(term %in% keep_terms) %>%
+  mutate(
+    term = recode(
+      term,
+      "X(Intercept)"    = "Intercept",
+      "Xfhr2.L"         = "FHR (Group)",
+      "XsexFemale"      = "Sex (Female)",
+      "XweekendWeekend" = "Weekend",
+      .default = term
+    ),
+    stars = sig_stars(p.value),
+    `Effect (95% CI)` = paste0(
+      fmt_num(estimate, 2),
+      " (", fmt_num(conf.low, 2), ", ", fmt_num(conf.high, 2), ")",
+      stars
+    )
+  ) %>%
+  select(term, `Effect (95% CI)`)
+
+
+#========================
+# SMOOTH TERMS (edf + F + stars)
+#========================
+smooth_table <- as.data.frame(summary(nonlinear_order$gam)$s.table)
+
+tbl_smooth <- smooth_table %>%
+  rownames_to_column("term") %>%
+  mutate(
+    term = recode(
+      term,
+      "s(age)"         = "Smooth(Age)",
+      "s(age):fhr2FHR" = "Smooth(Age) × FHR"
+    ),
+    stars = sig_stars(`p-value`),
+    `Effect (95% CI)` = paste0(
+      fmt_num(F, 2), " (edf=", fmt_num(edf, 2), ")",
+      stars
+    )
+  ) %>%
+  select(term, `Effect (95% CI)`)
+
+#========================
+# Divider row + Combine
+#========================
+divider <- tibble(
+  term = "Smooth Terms",
+  `Effect (95% CI)` = ""
+)
+
+combined_df <- bind_rows(
+  mod1,
+  divider,
+  tbl_smooth
+)
+
+combined_table <- flextable(combined_df) %>%
+  set_caption("Model: Midpoint Time — General Additive Model") %>%
+  bold(i = nrow(mod1) + 1, j = 1) %>%  # bold "Smooth Terms"
+  autofit()
+
+save_as_docx(
+  "Model: Midpoint — GAM" = combined_table,
+  path = "MID_GAM_Table.docx"
+)
+```
+
+
+
+###Group
+```{r}
+
+merged$group2 <- ordered(merged$group, levels = c("Control", "MDD Risk", "BD Risk"))
+
+nonlinear_order <- gamm(
+  midpoint ~ group2 + sex + weekend + s(age, k = 5) +
+    s(age, by = group2, k = 5),  # one smooth per group
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+```
+
+
+###Predict
+
+```{r}
+newdat <- expand.grid(
+  age = 20,
+  fhr2 = levels(merged$fhr2),
+  sex = levels(merged$sex)[1],
+  weekend = levels(merged$weekend)[1]
+)
+
+# Make sure factor levels match
+newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
+newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
+newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
+
+# Predict from GAM (population-level)
+pred_20 <- predict(
+  nonlinear_order$gam,
+  newdata = newdat,
+  type = "response",
+  se.fit = TRUE
+)
+
+# Combine with newdat
+out <- cbind(newdat, fit = pred_20$fit, se = pred_20$se.fit)
+
+out
+```
+
+
 ##Linear
 ```{r}
-mod1 <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged)
+vars_mod1 <- c(
+  "midpoint",
+  "fhr",
+  "age",
+  "sex",
+  "weekend",
+  "fid",
+  "puberty_pds",
+  "puberty_pds_female",
+  "subject_id"
+)
+
+merged_mod1 <- merged %>%
+  dplyr::select(all_of(vars_mod1)) %>%
+  tidyr::drop_na()
+
+dat_8_12 <- merged_mod1 %>%
+  filter(age >= 8, age <= 12) %>%
+  mutate(
+    # make sure puberty_pds is numeric
+    puberty_pds_num = suppressWarnings(as.numeric(as.character(puberty_pds_female))),
+    
+    # optional: check you didn't accidentally create tons of NAs
+    # (you can inspect this after running)
+    
+    puberty_group = cut(
+    puberty_pds_num,
+    breaks = c(0.5, 1.5, 2.5, 3.5, 4.5, 5.5),
+    labels = c(
+      "Tanner I",
+      "Tanner II",
+      "Tanner III",
+      "Tanner IV",
+      "Tanner V"
+    ))
+  ) %>%
+  drop_na(puberty_group) 
+
+dat_8_12$age <- round(dat_8_12$age)
+ggplot(
+  dat_8_12 %>%
+    group_by(age, fhr, puberty_group) %>%
+    summarise(
+      mean_midpoint = mean(midpoint),
+      se_midpoint   = sd(midpoint) / sqrt(n()),
+      .groups = "drop"
+    ),
+  aes(x = factor(age), y = mean_midpoint, fill = fhr)
+) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  geom_errorbar(
+    aes(
+      ymin = mean_midpoint - se_midpoint,
+      ymax = mean_midpoint + se_midpoint
+    ),
+    width = 0.2,
+    position = position_dodge(width = 0.9)
+  ) +
+  facet_wrap(~ puberty_group) +
+  labs(
+    title = "Sleep midpoint by age (8–12), stratified by puberty",
+    x = "Age (years)",
+    y = "Mean sleep midpoint",
+    fill = "FHR group"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(size = 11),
+    axis.text.y = element_text(size = 11),
+    axis.title  = element_text(size = 13),
+    strip.text  = element_text(size = 12)
+  )
+
+
+
+mod1 <- lmer(midpoint ~ fhr*age + sex + weekend + (1|fid/subject_id), data = merged_mod1)
 summary(mod1)
 
-mod2 <- lmer(midpoint ~ group*age + sex + weekend + (1|fid/subject_id), data = merged)
+merged <- merged %>%
+  mutate(puberty_pds = coalesce(puberty_pds_male, puberty_pds_female))
+mod1_pub <- lmer(midpoint ~ fhr*age + sex + weekend + puberty_pds + (1|fid/subject_id), data = merged_mod1)
+summary(mod1_pub)
+anova(mod1, mod1_pub)
 
+
+
+
+mod2 <- lmer(midpoint ~ group*age + sex + weekend + (1|fid/subject_id), data = merged)
+anova(mod1, mod1_pub)
 summary(mod2)
 ```
 
 
 ###Table
 ```{r}
+library(dplyr)
+library(broom.mixed)
+library(flextable)
+library(officer)
+library(dplyr)
+library(broom.mixed)
+library(flextable)
+library(officer)
+
+mod1 <- lmer(midpoint ~ fhr2*age + sex + weekend + (1|fid_new/subject_id), data = merged)
+
 apa_format <- function(model){
-  tidy(model, effects = "fixed", conf.int = TRUE) %>%
+  broom.mixed::tidy(model, effects = "fixed", conf.int = TRUE) %>%
     mutate(
       Predictor = recode(term,
         "(Intercept)"     = "Intercept",
@@ -251,21 +705,18 @@ apa_format <- function(model){
         "sexFemale"       = "Sex (Female)",
         "weekendWeekend"  = "Weekend"
       ),
-      `b (SE)` = sprintf("%.2f (%.2f)", estimate, std.error),
-      CI = sprintf("[%.2f, %.2f]", conf.low, conf.high),
-      p = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
+      stars = dplyr::case_when(
+        p.value < .001 ~ "***",
+        p.value < .01  ~ "**",
+        p.value < .05  ~ "*",
+        TRUE           ~ ""
+      ),
+      `β [95% CI]` = sprintf("%.2f%s [%.2f, %.2f]", estimate, stars, conf.low, conf.high)
     ) %>%
-    select(Predictor, `b (SE)`, CI, p)
+    select(Predictor, `β [95% CI]`)
 }
 
 m1 <- apa_format(mod1)
-m2 <- apa_format(mod2)
-
-combined <- full_join(
-  m1 %>% rename(b1 = `b (SE)`, CI1 = CI, p1 = p),
-  m2 %>% rename(b2 = `b (SE)`, CI2 = CI, p2 = p),
-  by = "Predictor"
-)
 
 order_terms <- c(
   "Intercept",
@@ -280,39 +731,34 @@ order_terms <- c(
   "Weekend"
 )
 
-combined <- combined %>%
+m1 <- m1 %>%
   mutate(Predictor = factor(Predictor, levels = order_terms)) %>%
-  arrange(Predictor) %>%
-  replace(is.na(.), "")
+  arrange(Predictor)
 
-
-ft <- flextable(combined) %>%
+ft <- flextable(m1) %>%
   set_header_labels(
     Predictor = "Predictor",
-    b1 = "β (SE)",
-    CI1 = "95% CI",
-    p1 = "p",
-    b2 = "β (SE)",
-    CI2 = "95% CI",
-    p2 = "p"
+    `β [95% CI]` = "β [95% CI]"
   ) %>%
   add_header_row(
-    values = c("", "Model 1", "Model 1", "Model 1",
-                  "Model 2", "Model 2", "Model 2"),
-    colwidths = c(1,1,1,1,1,1,1)
+    values = c("", "Model 1"),
+    colwidths = c(1, 1)
   ) %>%
   merge_h(part = "header") %>%
   autofit() %>%
-  align(j = 2:7, align = "center") %>%
+  align(j = 2, align = "center") %>%
   align(j = 1, align = "left") %>%
-  bold(part = "header")
+  bold(part = "header") %>%
+  add_footer_lines(values = c(
+    "Note. Values are β with 95% confidence intervals in brackets.",
+    "* p < .05. ** p < .01. *** p < .001."
+  ))
 
 ft
 
-
 save_as_docx(
-  "Linear Mixed Models Predicting TST" = ft,
-  path = "MID_TwoModel_APA_Table.docx"
+  "Linear Mixed Model Predicting MID (Model 2)" = ft,
+  path = "MID_Model1_APA_LMER_Table.docx"
 )
 ```
 
@@ -480,371 +926,4 @@ ggsave(
   bg = "white"
 )
 ```
-
-##Nonlinear 
-###Main
-
-```{r}
-##Mid Point
-merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
-
-linear <- lmer(midpoint ~ fhr2*age + sex + weekend + (1|fid/subject_id), data = merged)
-
-nonlinear <- gamm(
-  midpoint ~ fhr + sex + weekend + 
-    s(age, by = fhr, k = 5),        # additional smooth for FHR
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-nonlinear_order <- gamm(
-  midpoint ~ fhr2 + sex + weekend + s(age, k = 5) +
-    s(age, by = fhr2, k = 5),        # additional smooth for FHR
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-
-summary(nonlinear_order$gam)
-
-##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p_mid <-  0.00361
-
-BIC(linear, nonlinear_order$lme)
-```
-###Visualization
-####Graph A
-```{r}
-age_seq <- seq(min(merged$age), max(merged$age), length.out = 200)
-
-# Create a new data frame with average covariate values
-newdat <- expand.grid(
-  age = age_seq,
-  fhr = factor(levels(merged$fhr), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),         # hold sex constant
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))  # hold weekend constant
-)
-
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-
-pred <- predict(nonlinear$gam, newdata = newdat, se.fit = TRUE, exclude = "s(subject_id)")
-
-newdat$fit <- pred$fit
-newdat$se <- pred$se.fit
-z <- qnorm(0.975)  # 1.96
-newdat <- newdat %>%
-  mutate(
-    lower = fit - z * se,
-    upper = fit + z * se
-  )
-
-# 6. Plot adjusted smooths for groups with ggplot
-sum <- merged %>%
-  group_by(filename) %>%
-    summarise(
-      MIDm = mean(midpoint, na.rm = TRUE),
-      age = mean(age, na.rm = TRUE),
-      fhr = first(fhr)
-    )
-
-mgcv::plot.gam(nonlinear$gam)
-MIDoutput <- ggplot() +
-  # Raw data
-  geom_point(data = sum,
-             aes(x = age, y = MIDm, color = fhr),
-             alpha = 0.25, size = 1.2) +
-  
-  # Model predictions
-  geom_line(data = newdat,
-            aes(x = age, y = fit, color = fhr),
-            size = 1.2) +
-  geom_ribbon(data = newdat,
-              aes(x = age, ymin = lower, ymax = upper, fill = fhr),
-              alpha = 0.25, color = NA) +
-  
-  # Scales (match both color & fill and give them the same legend title)
-  scale_color_manual(
-    name = "Group",                # 👈 ensures both share same legend title
-    values = c("Control" = "#6699FF", "FHR" = "#FF6666")
-  ) +
-  scale_fill_manual(
-    name = "Group",                # 👈 must be identical to color's 'name'
-    values = c("Control" = "#6699FF", "FHR" = "#FF6666")
-  ) +
-  
-scale_y_continuous(
-  limits = c(0, 8),
-  breaks = seq(0, 8, by = 2),
-  labels = c("12:00 AM", "2:00 AM", "4:00 AM", "6:00 AM", "8:00 AM")
-) +
-  labs(
-    title = "Observed and Modelled Sleep Midpoint by Group",
-    x = "Age",
-    y = "Sleep Midpoint"
-  ) + 
-  annotate(
-  "text",
-  x = min(newdat$age) + 0.5,
-  y = 0.2,
-  label = expression(bold(italic("p"))[BONF.] < 0.01),
-  parse = TRUE,
-  hjust = 0
-) +
-  theme_minimal()
-MIDoutput
-```
-
-####Graph B
-```{r}
-#Differences
-bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
-(confint(nonlinear_order$gam, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
-
-MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
-  
-  geom_hline(yintercept = 0, linewidth = 0.8) + 
-  
-  scale_x_continuous(
-  limits = c(8, 25),
-  breaks = seq(10, 25, by = 5)
-) +
-  
-    # ---- Significant: 10 → 14.04 ----
-  geom_ribbon(
-    data = subset(bands, age >= 8 & age <= 12.1),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#8E4A8E",
-    alpha = 0.5
-  ) +
-  
-    # ---- Insignificant: 14.04 → 17.5 ----
-  geom_ribbon(
-    data = subset(bands, age > 12.1 & age <= 17.1),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#B380B3",
-    alpha = 0.25
-  ) +
-
-  # ---- Significant: 10 → 14.04 ----
-  geom_ribbon(
-    data = subset(bands, age > 17.1 & age <= 25),
-    aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#8E4A8E",
-    alpha = 0.5
-  ) +
-
-  geom_line(linewidth = 1.3) +
-
-  labs(
-    title = "Age-varying difference in midpoint",
-    x = "Age (years)",
-    y = "Difference in predicted midpoint"
-  ) +
-
-  theme_minimal()
-
-MIDdiff
-
-
-
-
-```
-
-####Combined Graph
-```{r}
-  library(patchwork)
-
-MIDoutput <- MIDoutput +
-  labs(tag = "(A)") +
-  theme(
-    plot.tag = element_text(size = 14, face = "bold"),
-    plot.tag.position = c(0, 1),   # top-left
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
-MIDdiff <- MIDdiff +
-  labs(tag = "(B)") +
-  theme(
-    plot.tag = element_text(size = 14, face = "bold"),
-    plot.tag.position = c(0, 1),   # top-left
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-MIDcombo <- MIDoutput + MIDdiff +
-  plot_layout(ncol = 2, widths = c(1, 1)) +
-  plot_annotation(
-    title = "",
-    theme = theme(
-      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
-      plot.margin = margin(15, 15, 15, 15)
-    )
-  )
-MIDcombo
-ggsave(
-  "MID_Patchwork.png",
-  plot = MIDcombo,
-  width = 8.5, height = 6.5, units = "in", dpi = 600,
-  bg = "white"
-)
-
-
-```
-
-####Age get
-```{r}
-newdat <- expand.grid(
-  age = 18,
-  fhr = factor(c("Control", "FHR"), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))
-)
-
-# Assign one subject ID (for random effects if included)
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-
-pred_fit <- predict(
-  nonlinear$gam,
-  newdata = newdat,
-  type = "response",
-  exclude = "s(subject_id)"
-)
-
-cbind(newdat, pred = pred_fit)
-```
-
-###Table
-```{R}
-library(dplyr)
-library(flextable)
-library(broom.mixed)
-library(tibble)
-
-#========================
-# FIXED EFFECTS
-#========================
-mod1 <- broom.mixed::tidy(nonlinear_order$lme,
-                          effects = "fixed",
-                          conf.int = TRUE)
-
-# remove spline basis coefficients
-mod1 <- mod1 %>% filter(!grepl("^Xs", term))
-
-format_model <- function(model_df) {
-  model_df %>%
-    mutate(
-      term = recode(term,
-        "X(Intercept)"        = "Intercept",
-        "Xfhr2.L"             = "FHR (Group)",
-        "XsexFemale"          = "Sex (Female)",
-        "XweekendWeekend"     = "Weekend"
-      ),
-      `b (SE)`   = sprintf("%.2f (%.2f)", estimate, std.error),
-      `95% CI`   = sprintf("[%.2f, %.2f]", conf.low, conf.high),
-      `p value`  = ifelse(p.value < .001, "<.001", sprintf("%.3f", p.value))
-    ) %>%
-    select(term, `b (SE)`, `95% CI`, `p value`)
-}
-
-tbl_fixed <- format_model(mod1)
-
-#========================
-# SMOOTH TERMS
-#========================
-smooth_table <- as.data.frame(summary(nonlinear_order$gam)$s.table)
-
-tbl_smooth <- smooth_table %>%
-  tibble::rownames_to_column("term") %>%
-  mutate(
-    term = recode(
-      term,
-      "s(age)"             = "Smooth(Age)",
-      "s(age):fhr2FHR"     = "Smooth(Age) × FHR"
-    ),
-    edf = sprintf("%.2f", edf),
-    F   = sprintf("%.2f", F),
-    `p value` = ifelse(`p-value` < .001, "<.001", sprintf("%.3f", `p-value`))
-  ) %>%
-  select(term, edf, F, `p value`)
-
-#========================
-# BUILD ONE TABLE
-#========================
-# Create divider row
-divider <- tibble(
-  term = "Smooth Terms",
-  `b (SE)` = NA,
-  `95% CI` = NA,
-  `p value` = NA
-)
-
-# Rename smooth-term columns to match fixed layout
-tbl_smooth_fmt <- tbl_smooth %>%
-  rename(`b (SE)` = edf,
-         `95% CI` = F)
-
-# Bind everything together
-combined_df <- bind_rows(
-  tbl_fixed,
-  divider,
-  tbl_smooth_fmt
-)
-
-combined_table <- flextable(combined_df) %>%
-  set_caption("Model: Midpoint of Sleep — General Additive Model") %>%
-  bold(i = nrow(tbl_fixed) + 1, j = 1) %>%   # bold the "Smooth Terms" row
-  autofit()
-
-save_as_docx(
-  "Model: Midpoint of Sleep — GAM" = combined_table,
-  path = "MID_GAM_Table.docx"
-)
-```
-
-
-
-###Group
-```{r}
-
-merged$group2 <- ordered(merged$group, levels = c("Control", "MDD Risk", "BD Risk"))
-
-nonlinear_order <- gamm(
-  midpoint ~ group2 + sex + weekend + s(age, k = 5) +
-    s(age, by = group2, k = 5),  # one smooth per group
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-```
-
-#Looking at mid
-```{r}
-newdat <- expand.grid(
-  age = 18,
-  fhr2 = levels(merged$fhr2),
-  sex = levels(merged$sex)[1],
-  weekend = levels(merged$weekend)[1]
-)
-
-# Make sure factor levels match
-newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
-newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
-newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
-
-# Predict from GAM (population-level)
-pred_18 <- predict(
-  nonlinear_order$gam,
-  newdata = newdat,
-  type = "response",
-  se.fit = TRUE
-)
-
-# Combine with newdat
-out <- cbind(newdat, fit = pred_18$fit, se = pred_18$se.fit)
-
-out
-
-```
-
 

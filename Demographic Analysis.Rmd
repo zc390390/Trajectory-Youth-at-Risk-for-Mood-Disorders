@@ -213,10 +213,10 @@ table(merged$sex)
 
 #Filter assessment dates
 unmerged <- unmerged %>%
-  filter(Assessment_Date < as.Date("2021-07-01"))
+  filter(Assessment_Date > as.Date("2021-07-01"))
 table(unmerged$age)
 
-#103
+#166
 
 #Compare now
 #sex
@@ -292,8 +292,8 @@ demo <- merged_s %>%
   ) %>%
   mutate(
     group = factor(group,
-                   levels = c(0, 1, 2),
-                   labels = c("Control", "MDD Risk", "BD Risk"))
+                   levels = c(0, 1, 2, 3),
+                   labels = c("Control", "MDD Risk", "BD Risk", "Psy Risk"))
   )
 
 demo_check <- demo %>%
@@ -329,6 +329,8 @@ table_demo <- demo_check %>%
 
 pander(table_demo)
 
+
+
 #Compare differences
 #age
 anova_age <- aov(age ~ group, data = demo)
@@ -341,6 +343,13 @@ sex_chi <- chisq.test(sex_tab)
 sex_chi
 
 #race
+demo <- demo %>%
+  mutate(
+    race = case_when(
+      race %in% c("5", "6") ~ "9",
+      TRUE                  ~ race
+    )
+  )
 chisq.test(table(demo$group, demo$race))
 
 
