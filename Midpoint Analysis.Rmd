@@ -5,74 +5,80 @@ date: '2025-07-28'
 output: html_document
 ---
 
-  
-# Library & Notes
+#1.0 Setup
+##1.1 Library
 ```{r setup, include=FALSE}
-  ## ─────────────────────────────
-  ## 📦 Data Import & Manipulation
-  ## ─────────────────────────────
-  library(haven)       # Read SPSS, SAS, Stata files
-  library(readr)       # Read CSVs
-  library(readxl)      # Read Excel files
-  library(data.table)  # Fast data manipulation
-  library(dplyr)       # Data manipulation
-  library(tidyr)       # Data tidying
-  library(stringr)     # String operations
-  library(purrr)       # Functional programming
-  library(zoo)         # Time series & rolling functions
-  library(lubridate)   # Dates & times
-  library(fuzzyjoin)   # Fuzzy matching joins
-  
-  ## ─────────────────────────────
-  ## 📊 Modeling & Statistics
-  ## ─────────────────────────────
-  library(lme4)        # Mixed-effects models
-  library(lmerTest)    # p-values for lmer
-  library(coxme)       # Cox mixed-effects models
-  library(survival)    # Survival analysis
-  library(MuMIn)       # Model selection & R²
-  library(lsmeans)     # Least-squares means (now emmeans)
-  library(mgcv)        # Generalized Additive Models
-  library(gratia)      # GAM diagnostics & visualization
-  library(gamm4)       # GAMM fitting
-  library(patchwork)
-  
-  ## ─────────────────────────────
-  ## 📑 Tables & Reporting
-  ## ─────────────────────────────
-  library(broom)       # Tidy model output
-  library(pander)      # Pretty markdown tables
-  library(apaTables)   # APA-style tables
-  library(flextable)   # Formatted tables
-  library(officer)     # Export to Word/PowerPoint
-  library(webshot2)    # Save HTML tables/images
-  
-  ## ─────────────────────────────
-  ## 🎨 Plotting & Visualization
-  ## ─────────────────────────────
-  library(ggplot2)     # General plotting
+## ─────────────────────────────
+## 📦 Data Import & Manipulation
+## ─────────────────────────────
+library(haven)       # Read SPSS, SAS, Stata files
+library(readr)       # Read CSVs
+library(readxl)      # Read Excel files
+library(data.table)  # Fast data manipulation
+library(dplyr)       # Data manipulation
+library(tidyr)       # Data tidying
+library(stringr)     # String operations
+library(purrr)       # Functional programming
+library(zoo)         # Time series & rolling functions
+library(lubridate)   # Dates & times
+library(fuzzyjoin)   # Fuzzy matching joins
+
+## ─────────────────────────────
+## 📊 Modeling & Statistics
+## ─────────────────────────────
+library(lme4)        # Mixed-effects models
+library(lmerTest)    # p-values for lmer
+library(coxme)       # Cox mixed-effects models
+library(survival)    # Survival analysis
+library(MuMIn)       # Model selection & R²
+library(lsmeans)     # Least-squares means (now emmeans)
+library(mgcv)        # Generalized Additive Models
+library(gratia)      # GAM diagnostics & visualization
+library(gamm4)       # GAMM fitting
+library(patchwork)
+
+## ─────────────────────────────
+## 📑 Tables & Reporting
+## ─────────────────────────────
+library(broom)       # Tidy model output
+library(pander)      # Pretty markdown tables
+library(apaTables)   # APA-style tables
+library(flextable)   # Formatted tables
+library(officer)     # Export to Word/PowerPoint
+library(webshot2)    # Save HTML tables/images
+
+## ─────────────────────────────
+## 🎨 Plotting & Visualization
+## ─────────────────────────────
+library(ggplot2)     # General plotting
+
+library(dplyr)
+library(broom.mixed)
+library(flextable)
+library(officer)
+library(dplyr)
+library(broom.mixed)
+library(flextable)
+library(officer)
 ```
 
-#Load Data
-
-
-
-#Non-Mean Exploration
+##1.2 Data Load
 ```{r}
 # setwd("C:/Users/hubshmz/Documents/Code/git/data")  # FORBOW computer
   setwd("C:/Users/zacha/OneDrive/Documents/Code/Data")  # Laptop
 # setwd("C:/Users/zacha/Documents/RStudio/forbow/git/Data") # Tupper Windows Comp
 # setwd("C:/Users/zacha/Documents/forbow/code/git/data") # Home Computer\
 
-
-
-
-FOR <- readr::read_csv("analytic-zach.csv", col_types = cols(.default = col_character()))
+FOR <- readr::read_csv("analytic-zach1.csv", col_types = cols(.default = col_character()))
 Night <- readr::read_csv("part4_nightsummary_sleep_cleaned.csv", col_types = cols(.default = col_character()))
 NightM <- read_excel("motionloggerdata.xlsx")
 
-#Fix clerical errors
+FOR <- FOR %>%  select(age,assessment_date,time_point,group,sex,race,subject_id,fid)
+```
 
+#2.0 Data Setup
+##2.1 Fixing Clerical Errors
+```{r}
 Night$calendar_date <- as.Date(Night$calendar_date)
 Night <- Night %>%
   mutate(
@@ -104,8 +110,10 @@ Night <- Night %>%
     !(filename == "800-0250-464_left wrist_068218_2025-12-01 14-08-11.bin" &
     sleepparam == "spt_crude_estimate")
   )
-
-
+```
+##2.2 Merging
+###2.2.1 GeneActiv
+```{r}
 Night <- Night %>%
   mutate(Subject_ID = gsub("^800-(\\d{3})-(\\d+)_$", "800-0\\1-\\2", Subject_ID))
 Night$Subject_ID <- gsub("-", "", Night$Subject_ID)
@@ -125,9 +133,9 @@ merged1 <- Night[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
 merged1[, diffdays := (as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
 
 merged1 <- merged1 %>% filter(diffdays >= 0 & diffdays <= 100)
-
-two <- merged1[(Subject_ID %in% c(8000038204, 8000114479))]
-
+```
+###2.2.2 Motionlogger
+```{r}
 ##Motion Logger Merging
 NightM <- NightM %>%
   mutate(filename = paste0(ID, "motionlogg"))
@@ -136,20 +144,22 @@ NightM <- NightM %>%
   filter(!str_detect(Subject_ID, "F[1-3]|f[1-3]|M[1-3]|m[1-3]|\\$R"))
 setDT(NightM)
 NightM[, Assessment_Date := as.Date(sdate)]
-NightM$Assessment_date_nightM <- NightM$Assessment_Date
+NightM$Assessment_Date_Night <- NightM$Assessment_Date
 merged2 <- NightM[FOR, on = .(Subject_ID), allow.cartesian = TRUE]
-merged2[, diffdays := abs(as.numeric(difftime(Assessment_date_nightM, Assessment_Date_FOR, units = "days")))]
+merged2[, diffdays := abs(as.numeric(difftime(Assessment_Date_Night, Assessment_Date_FOR, units = "days")))]
 merged2 <- merged2 %>% filter(diffdays >= 0 & diffdays <= 100)
 merged2$motionlogger <- 1
-
-#Combination of Motion and GeneActiv
-merged <- rbindlist(list(merged1, merged2), fill = TRUE)
-
-merged <- merged[Assessment_Date_Night >= as.Date("2017-01-01")]
 ```
 
+###2.2.3 Final Merge
+```{r}
+#Combination of Motion and GeneActiv
+merged <- rbindlist(list(merged1, merged2), fill = TRUE)
+length(unique(merged$subject_id))
+```
 
-#Midpoint
+##2.3 Model Setup
+###2.3.1 Calculate Midpoint
 ```{r message=FALSE, warning=FALSE}
 #Setup
 merged$sleeponset <- as.numeric(merged$sleeponset)
@@ -159,19 +169,12 @@ merged$midpoint <- (merged$wakeup + merged$sleeponset)/2
 merged$midpoint <- merged$midpoint - 24
 ```
 
-
-
-#Data Setup
-##Labeling & Filtering
+###2.3.2 Setting up data as specific structure
 ```{r}
-
-#Creating FHR Variable and Weekend
 merged <- merged %>%
   mutate(fhr = ifelse(group %in% c(1, 2, 3), 1, 0))
 
-merged$weekend <- ifelse(merged$weekday %in% 
-                         c("Fri", "Friday", "Sat", "Saturday"), 1, 0)
-
+merged$weekend <- ifelse(merged$weekday %in% c("Fri", "Friday", "Sat", "Saturday"), 1, 0)
 #Labeling
 merged$fhr <- factor(merged$fhr,
                        levels = c(0, 1),
@@ -187,21 +190,16 @@ merged$weekend <- factor(merged$weekend,
                          labels = c("Weekday", "Weekend"))
 merged$age <- as.numeric(merged$age)
 merged$subject_id <- as.factor(merged$subject_id)
+merged$fid <- as.factor(merged$fid)
 merged$SleepDurationInSpt <- as.numeric(merged$SleepDurationInSpt)
-merged$fid <- factor(merged$fid)
+merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR")) # ???????
+```
 
-
-#Remove Psy Risk and Those without gruop
+###2.3.3 Filtering 
+```{r}
+#Remove Psy Risk
 merged <- merged %>% filter(age < 25 & age >= 8)
 merged <- merged %>% filter(group != 'Psy Risk')
-
-table(merged$group)
-
-merged <- merged %>%
-  mutate(
-    mdd = factor(ifelse(group == "MDD Risk", 1, 0), levels = c(0, 1)),
-    bd  = factor(ifelse(group == "BD Risk", 1, 0), levels = c(0, 1))
-  )
 
 merged <- merged %>%
   group_by(filename) %>%   # or filename
@@ -210,19 +208,37 @@ merged <- merged %>%
     sum(weekend == "Weekday", na.rm = TRUE) >= 3
   ) %>%
   ungroup()
-
 ```
 
-#Main Analysis
-##Nonlinear 
-###Main
-```{r}
-##Mid Point
-merged$fhr2 <- ordered(merged$fhr, levels = c("Control", "FHR"))
-merged$fid_new <- as.factor(substr(merged$Subject_ID, 1, 8))
 
+#3.0 Main Analysis
+##3.1 Nonlinear (Main)
+```{r}
+nonlinear_order <- gamm(
+  midpoint ~ fhr2 + sex + weekend + s(age, k = 5) +
+    s(age, by = fhr2, k = 5),        # additional smooth for FHR
+  random = list(fid = ~1, subject_id = ~1),
+  data = merged,
+  method = "REML"
+)
+
+summary(nonlinear_order$gam)
+draw(nonlinear_order)
+
+p_mid <-  0.000164
+f <- 8.74
+```
+
+###3.1.1 Comparison
+```{r}
 linear <- lmer(midpoint ~ fhr2*age + sex + weekend + (1|fid_new/subject_id), data = merged)
 
+BIC(linear, nonlinear_order$lme)
+```
+####3.1.2 Visualization
+#####3.1.2.1 Graph A
+```{r}
+#Model for Graph
 nonlinear <- gamm(
   midpoint ~ fhr + sex + weekend + 
     s(age, by = fhr, k = 5),        # additional smooth for FHR
@@ -231,25 +247,7 @@ nonlinear <- gamm(
   method = "REML"
 )
 
-nonlinear_order <- gamm(
-  midpoint ~ fhr2 + sex + weekend + s(age, k = 5) +
-    s(age, by = fhr2, k = 5),        # additional smooth for FHR
-  random = list(fid_new = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
 
-summary(nonlinear_order$gam)
-
-##Below p value is from the summary, there is likely a way to automate finding it but I dont care
-p_mid <-  0.000518
-f <- 12.08
-
-BIC(linear, nonlinear_order$lme)
-```
-###Visualization
-####Graph A
-```{r}
 age_seq <- seq(min(merged$age), max(merged$age), length.out = 200)
 
 # Create a new data frame with average covariate values
@@ -321,7 +319,7 @@ scale_y_continuous(
 MIDoutput
 ```
 
-####Graph B
+#####3.1.2.2 Graph B
 ```{r}
 #Differences
 bands <- (confint(nonlinear_order$gam, n = 20000, "s(age):fhr2FHR", level = 0.95, type = "simultaneous"))
@@ -340,7 +338,7 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   geom_ribbon(
     data = subset(bands, age >= 8 & age <= 13),
     aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#8E4A8E",
+    fill  = "grey40",
     alpha = 0.5
   ) +
   
@@ -348,7 +346,7 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   geom_ribbon(
     data = subset(bands, age > 13 & age <= 16.45),
     aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#B380B3",
+    fill  = "grey75",
     alpha = 0.25
   ) +
 
@@ -356,7 +354,7 @@ MIDdiff <- ggplot(bands, aes(x = age, y = .estimate)) +
   geom_ribbon(
     data = subset(bands, age > 16.45 & age <= 25),
     aes(ymin = .lower_ci, ymax = .upper_ci),
-    fill  = "#8E4A8E",
+    fill  = "grey40",
     alpha = 0.5
   ) +
 
@@ -377,7 +375,7 @@ MIDdiff
 
 ```
 
-####Combined Graph
+#####3.1.2.3 Combined Graph
 ```{r}
   library(patchwork)
 
@@ -418,29 +416,8 @@ ggsave(
 
 ```
 
-####Age get
-```{r}
-newdat <- expand.grid(
-  age = 18,
-  fhr = factor(c("Control", "FHR"), levels = levels(merged$fhr)),
-  sex = factor(levels(merged$sex)[1], levels = levels(merged$sex)),
-  weekend = factor(levels(merged$weekend)[1], levels = levels(merged$weekend))
-)
 
-# Assign one subject ID (for random effects if included)
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-
-pred_fit <- predict(
-  nonlinear$gam,
-  newdata = newdat,
-  type = "response",
-  exclude = "s(subject_id)"
-)
-
-cbind(newdat, pred = pred_fit)
-```
-
-###Table
+####3.1.3 Table
 ```{R}
 #========================
 # Helper functions
@@ -529,6 +506,8 @@ combined_table <- flextable(combined_df) %>%
   bold(i = nrow(mod1) + 1, j = 1) %>%  # bold "Smooth Terms"
   autofit()
 
+combined_table
+
 save_as_docx(
   "Model: Midpoint — GAM" = combined_table,
   path = "MID_GAM_Table.docx"
@@ -536,53 +515,7 @@ save_as_docx(
 ```
 
 
-
-###Group
-```{r}
-
-merged$group2 <- ordered(merged$group, levels = c("Control", "MDD Risk", "BD Risk"))
-
-nonlinear_order <- gamm(
-  midpoint ~ group2 + sex + weekend + s(age, k = 5) +
-    s(age, by = group2, k = 5),  # one smooth per group
-  random = list(fid = ~1, subject_id = ~1),
-  data = merged,
-  method = "REML"
-)
-```
-
-
-###Predict
-
-```{r}
-newdat <- expand.grid(
-  age = 20,
-  fhr2 = levels(merged$fhr2),
-  sex = levels(merged$sex)[1],
-  weekend = levels(merged$weekend)[1]
-)
-
-# Make sure factor levels match
-newdat$fhr2   <- factor(newdat$fhr2, levels = levels(merged$fhr2))
-newdat$sex    <- factor(newdat$sex,  levels = levels(merged$sex))
-newdat$weekend <- factor(newdat$weekend, levels = levels(merged$weekend))
-
-# Predict from GAM (population-level)
-pred_20 <- predict(
-  nonlinear_order$gam,
-  newdata = newdat,
-  type = "response",
-  se.fit = TRUE
-)
-
-# Combine with newdat
-out <- cbind(newdat, fit = pred_20$fit, se = pred_20$se.fit)
-
-out
-```
-
-
-##Linear
+##3.2 Linear
 ```{r}
 vars_mod1 <- c(
   "midpoint",
@@ -677,7 +610,7 @@ summary(mod2)
 ```
 
 
-###Table
+###3.2.1 Table
 ```{r}
 library(dplyr)
 library(broom.mixed)
@@ -761,169 +694,3 @@ save_as_docx(
   path = "MID_Model1_APA_LMER_Table.docx"
 )
 ```
-
-###Visualize
-```{r}
-#Graph 1
-age_seq <- seq(
-  min(merged$age, na.rm = TRUE),
-  max(merged$age, na.rm = TRUE),
-  length.out = 200
-)
-
-# 1. Prediction dataframe
-newdat <- expand.grid(
-  age = age_seq,
-  fhr = levels(merged$fhr),
-  sex = levels(merged$sex)[1],
-  weekend = levels(merged$weekend)[1]
-) %>%
-  mutate(
-    fhr = factor(fhr, levels = levels(merged$fhr)),
-    sex = factor(sex, levels = levels(merged$sex)),
-    weekend = factor(weekend, levels = levels(merged$weekend))
-  )
-
-# 2. Add valid random-effect IDs
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-newdat$fid        <- factor(merged$fid[1], levels = levels(merged$fid))
-
-# 3. Predict SRI, excluding RE if needed
-pred <- predict(
-  mod1,
-  newdata = newdat,
-  re.form = NA,       # <--- KEY FIX
-  se.fit = TRUE
-)
-
-
-newdat$fit <- pred$fit
-
-sum <- merged %>%
-  group_by(filename) %>%
-  summarise(
-    MIDm = mean(midpoint, na.rm = TRUE),
-    age  = mean(age, na.rm = TRUE),
-    fhr  = first(fhr)
-  )
-
-MIDoutput1 <- ggplot() +
-  geom_point(data = sum,
-             aes(x = age, y = MIDm, color = fhr),
-             alpha = 0.25, size = 1.2) +
-  geom_line(data = newdat,
-            aes(x = age, y = fit, color = fhr),
-            size = 1.2) +
-  scale_color_manual(values = c("Control" = "lightblue", "FHR" = "darkorange")) +
-  scale_y_continuous(limits = c(0,8), breaks = seq(0,8,2)) +
-  labs(
-    title = "Model 1",
-    x = "Age",
-    y = "Midpoint of Sleep in Hours (0 = Midnight)",
-    color = "Group"
-  ) +
-  theme_minimal()
-MIDoutput1
-
-#Graph 2
-age_seq <- seq(
-  min(merged$age, na.rm = TRUE),
-  max(merged$age, na.rm = TRUE),
-  length.out = 200
-)
-
-# 1. Prediction dataframe
-newdat <- expand.grid(
-  age     = age_seq,
-  group   = c("Control", "MDD Risk", "BD Risk"),        # <-- CORRECT
-  sex     = levels(merged$sex)[1],       # hold constant
-  weekend = levels(merged$weekend)[1]    # hold constant
-)
-
-# Ensure factor structure matches the model
-newdat <- newdat %>%
-  mutate(
-    group   = factor(group,   levels = levels(merged$group)),
-    sex     = factor(sex,     levels = levels(merged$sex)),
-    weekend = factor(weekend, levels = levels(merged$weekend)),
-    fid = merged$fid[1],               # valid RE levels
-    subject_id = merged$subject_id[1]
-  )
-
-# 2. Add valid random-effect IDs
-newdat$subject_id <- factor(merged$subject_id[1], levels = levels(merged$subject_id))
-newdat$fid        <- factor(merged$fid[1], levels = levels(merged$fid))
-
-# 3. Predict SRI, excluding RE if needed
-pred <- predict(
-  mod2,
-  newdata = newdat,
-  re.form = NA,    # fixed effects only
-  se.fit  = FALSE
-)
-
-newdat$fit <- pred
-
-sum <- merged %>%
-  filter(group %in% c("Control", "MDD Risk", "BD Risk")) %>%   # keep only these
-  group_by(filename) %>%
-  summarise(
-    MIDm  = mean(midpoint, na.rm = TRUE),
-    age   = mean(age, na.rm = TRUE),
-    group = first(group)
-  )
-
-
-MIDoutput2 <- ggplot() +
-  geom_point(data = sum,
-             aes(x = age, y = MIDm, color = group),
-             alpha = 0.25, size = 1.2) +
-  geom_line(data = newdat,
-            aes(x = age, y = fit, color = group),
-            size = 1.2) +
-  scale_color_manual(values = c(
-    "Control" = "lightblue",
-    "MDD Risk"     = "darkorange",
-    "BD Risk"      = "darkred"
-  )) +
-  scale_y_continuous(limits = c(0,8), breaks = seq(0,8,2)) +
-  labs(
-    title = "Model 2",
-    x = "Age",
-    y = "Sleep Regularity",
-    color = "Group"
-  ) +
-  theme_minimal()
-MIDoutput2
-
-MIDoutput1 <- MIDoutput1 + theme(legend.position = "top") + theme(legend.title = element_blank()) +
-  theme(
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
-MIDoutput2 <- MIDoutput2 + ylab(NULL) + theme(legend.position = "top") + theme(legend.title = element_blank()) +
-  theme(
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
-MIDcombo <- MIDoutput1 + MIDoutput2 +
-  plot_layout(ncol = 2, widths = c(1, 1)) +
-  plot_annotation(
-    title = "Observed and Modelled Midpoint of Sleep Trajectories by Group",
-    theme = theme(
-      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
-      plot.margin = margin(15, 15, 15, 15)
-    )
-  )
-MIDcombo
-
-ggsave(
-  "MID_Patchwork_Linear.png",
-  plot = MIDcombo,
-  width = 8.5, height = 6.5, units = "in", dpi = 600,
-  bg = "white"
-)
-```
-
