@@ -685,8 +685,8 @@ save_as_docx(
 
 ```
 
-#5.0 Side Thing
-##5.1 Basis functions
+#4.0 Side Thing
+##4.1 Basis functions
 ```{r}
 b <- gam(
   SleepDurationInSpt ~ fhr + sex + weekend + s(age, by = fhr, k = 5),
